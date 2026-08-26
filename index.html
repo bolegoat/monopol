@@ -1,0 +1,450 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Balkan Tycoon</title>
+    <link rel="icon" type="image/svg+xml" href="public/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="css/menu.css" />
+  </head>
+  <body>
+    <main class="app" id="app">
+      <!-- ============ LEFT: board zone ============ -->
+      <section class="board-zone">
+        <header class="top-bar">
+          <div class="brand">
+            <span class="brand-mark" data-icon="dice"></span>
+            <span class="brand-name">Balkan&nbsp;<em>Tycoon</em></span>
+          </div>
+          <div class="top-bar-right">
+            <span class="room-chip" id="room-chip" hidden></span>
+            <span class="turn-timer" id="turn-timer" hidden>
+              <span class="timer-ic" data-icon="clock"></span><b id="timer-value">45</b>
+            </span>
+            <div class="turn-chip" id="turn-chip">Welcome</div>
+          </div>
+        </header>
+
+        <div class="board-wrap">
+          <!-- 11x11 CSS grid; tiles injected by ui.js -->
+          <div class="board" id="board" aria-label="Game board">
+            <div class="board-center">
+              <div class="board-logo">
+                <span class="board-logo-top">BALKAN</span>
+                <span class="board-logo-bottom">TYCOON</span>
+                <span class="board-logo-sub">8 countries · 40 tiles · one empire</span>
+              </div>
+              <div class="last-roll" id="last-roll" aria-live="polite"></div>
+              <canvas id="dice-canvas"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <footer class="action-bar">
+          <div class="action-status" id="action-status">Set up a game to begin.</div>
+          <div class="action-buttons">
+            <button class="btn" id="btn-trade" disabled>
+              <span class="btn-ic" data-icon="exchange"></span>Trade
+            </button>
+            <button class="btn" id="btn-build" disabled>
+              <span class="btn-ic" data-icon="house"></span>Build
+            </button>
+            <button class="btn" id="btn-end-turn" disabled>
+              <span class="btn-ic" data-icon="arrowRight"></span>End Turn
+            </button>
+            <button class="btn btn-primary" id="btn-roll" disabled>
+              <span class="btn-ic" data-icon="dice"></span>Roll Dice
+            </button>
+          </div>
+        </footer>
+      </section>
+
+      <!-- ============ RIGHT: players + action log ============ -->
+      <aside class="side-panel">
+        <section class="panel-section panel-players">
+          <h2 class="panel-title">Players</h2>
+          <ul class="player-list" id="player-list"></ul>
+        </section>
+
+        <section class="panel-section panel-log">
+          <h2 class="panel-title">Action Log</h2>
+          <ul class="log-list" id="log-list"></ul>
+        </section>
+      </aside>
+
+      <!-- ============ PRE-GAME MENU / LOBBY SCREEN ============ -->
+      <div class="screen-menu" id="screen-menu">
+        <div class="menu-glow" aria-hidden="true"></div>
+        <div class="menu-card">
+
+          <header class="menu-brand">
+            <span class="menu-logo" data-icon="dice"></span>
+            <h1 class="menu-title">Balkan <em>Tycoon</em></h1>
+            <p class="menu-tag">Buy the coast. Tax your cousins. Avoid prison.</p>
+          </header>
+
+          <!-- home -->
+          <section class="menu-pane" id="pane-home">
+            <label class="field">
+              <span class="field__lbl">Nickname</span>
+              <input type="text" id="menu-nick" maxlength="14" placeholder="Your nickname" autocomplete="off" />
+            </label>
+            <div class="menu-paths">
+              <button class="path-card" id="btn-path-create" type="button">
+                <span class="path-card__ic" data-icon="cog"></span>
+                <span class="path-card__tx"><b>Create Game</b><small>Host an online room &amp; set the house rules</small></span>
+                <span class="path-card__go" data-icon="arrowRight"></span>
+              </button>
+              <button class="path-card" id="btn-path-join" type="button">
+                <span class="path-card__ic" data-icon="users"></span>
+                <span class="path-card__tx"><b>Join Game</b><small>Enter a friend&rsquo;s 5-character room code</small></span>
+                <span class="path-card__go" data-icon="arrowRight"></span>
+              </button>
+            </div>
+            <button class="linklike" id="btn-path-local" type="button">Play a local hot-seat game instead</button>
+          </section>
+
+          <!-- host: match settings -->
+          <section class="menu-pane" id="pane-create" hidden>
+            <div class="pane-head">
+              <button class="back-btn" data-back type="button" aria-label="Back" data-icon="cornerUpLeft"></button>
+              <h2>Create Game</h2>
+            </div>
+
+            <div class="settings-grid" id="settings-grid">
+              <div class="set-block">
+                <span class="field__lbl">Starting Capital</span>
+                <div class="chip-row" id="set-cash">
+                  <button class="chip" data-v="500" type="button">&euro;500</button>
+                  <button class="chip" data-v="800" type="button">&euro;800</button>
+                  <button class="chip" data-v="1000" type="button">&euro;1,000</button>
+                  <button class="chip is-active" data-v="1500" type="button">&euro;1,500</button>
+                  <button class="chip" data-v="2000" type="button">&euro;2,000</button>
+                </div>
+              </div>
+
+              <div class="set-block">
+                <span class="field__lbl">Max Players</span>
+                <div class="seg-row" id="set-max">
+                  <button class="seg" data-v="2" type="button">2</button>
+                  <button class="seg" data-v="3" type="button">3</button>
+                  <button class="seg is-active" data-v="4" type="button">4</button>
+                  <button class="seg" data-v="5" type="button">5</button>
+                  <button class="seg" data-v="6" type="button">6</button>
+                </div>
+              </div>
+
+              <div class="set-block">
+                <label class="field">
+                  <span class="field__lbl">Turn Timer</span>
+                  <select id="set-timer" class="select">
+                    <option value="30">30 seconds</option>
+                    <option value="45" selected>45 seconds</option>
+                    <option value="60">60 seconds</option>
+                    <option value="">Unlimited</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="set-block">
+                <span class="field__lbl">House Rules</span>
+                <label class="switch-row">
+                  <span class="switch-txt"><b>Pot Jackpot</b><small>Taxes &amp; fines pile up in the center pot</small></span>
+                  <input type="checkbox" id="rule-jackpot" checked />
+                  <i class="knob" aria-hidden="true"></i>
+                </label>
+                <label class="switch-row">
+                  <span class="switch-txt"><b>Double Rent on Full Sets</b><small>Owning a whole country doubles base rent</small></span>
+                  <input type="checkbox" id="rule-double" checked />
+                  <i class="knob" aria-hidden="true"></i>
+                </label>
+                <label class="switch-row">
+                  <span class="switch-txt"><b>Auction Declined Properties</b><small>Passing opens public bidding for anyone</small></span>
+                  <input type="checkbox" id="rule-auction" checked />
+                  <i class="knob" aria-hidden="true"></i>
+                </label>
+              </div>
+            </div>
+
+            <p class="modal-error" id="menu-error" hidden></p>
+            <button class="btn btn-primary btn-big" id="btn-create-room" type="button">Create Room</button>
+          </section>
+
+          <!-- guest: join by code -->
+          <section class="menu-pane" id="pane-join" hidden>
+            <div class="pane-head">
+              <button class="back-btn" data-back type="button" aria-label="Back" data-icon="cornerUpLeft"></button>
+              <h2>Join Game</h2>
+            </div>
+            <label class="field">
+              <span class="field__lbl">Room Code</span>
+              <input class="join-code join-code--big" id="menu-code" type="text" maxlength="5"
+                     placeholder="CODE" autocomplete="off" spellcheck="false" />
+            </label>
+            <p class="modal-error" id="join-error" hidden></p>
+            <button class="btn btn-primary btn-big" id="btn-join-room" type="button">Join Room</button>
+          </section>
+
+          <!-- local hot-seat -->
+          <section class="menu-pane" id="pane-local" hidden>
+            <div class="pane-head">
+              <button class="back-btn" data-back type="button" aria-label="Back" data-icon="cornerUpLeft"></button>
+              <h2>Local Hot-Seat</h2>
+            </div>
+            <div class="set-block">
+              <span class="field__lbl">Players</span>
+              <div class="seg-row" id="local-count">
+                <button class="seg" data-count="2" type="button">2</button>
+                <button class="seg" data-count="3" type="button">3</button>
+                <button class="seg is-active" data-count="4" type="button">4</button>
+                <button class="seg" data-count="5" type="button">5</button>
+                <button class="seg" data-count="6" type="button">6</button>
+              </div>
+            </div>
+            <div class="name-fields" id="name-fields"></div>
+            <button class="btn btn-primary btn-big" id="btn-start-game" type="button">Start Game</button>
+          </section>
+
+          <!-- staging room -->
+          <section class="menu-pane" id="pane-room" hidden>
+            <div class="stage-top">
+              <button class="back-btn" id="btn-stage-leave" type="button" aria-label="Leave room" data-icon="x"></button>
+              <div class="stage-code-wrap">
+                <span class="field__lbl">Room Code &mdash; click to copy</span>
+                <button class="code-big" id="room-code-big" type="button">&middot;&middot;&middot;&middot;&middot;</button>
+              </div>
+              <span class="stage-count" id="stage-count">1/4</span>
+            </div>
+
+            <ul class="stage-list" id="stage-list"></ul>
+
+            <div class="pick-block">
+              <span class="field__lbl">Your Token Face</span>
+              <div class="style-row" id="style-row"></div>
+            </div>
+            <div class="pick-block">
+              <span class="field__lbl">Your Color <em id="color-note" class="pick-note"></em></span>
+              <div class="swatch-row" id="swatch-row"></div>
+            </div>
+
+            <details class="rules-box" id="rules-box">
+              <summary>Match Settings<em id="settings-hint">host-controlled</em></summary>
+              <div class="rules-body" id="rules-slot"></div>
+            </details>
+
+            <div class="stage-actions" id="stage-actions">
+              <button class="btn btn-primary btn-big" id="btn-lobby-start" type="button" hidden>Start Match</button>
+              <button class="btn btn-big" id="btn-lobby-ready" type="button">Ready</button>
+            </div>
+          </section>
+
+        </div>
+      </div>
+
+      <!-- ============ IN-GAME MODALS ============ -->
+
+      <!-- property purchase -->
+      <div class="modal-overlay" id="modal-buy" hidden>
+        <div class="modal">
+          <div class="modal-flag" id="buy-colorbar"></div>
+          <h2 class="modal-title" id="buy-name">Property</h2>
+          <p class="modal-sub" id="buy-country"></p>
+          <div class="modal-price" id="buy-price"></div>
+          <p class="modal-note" id="buy-rent"></p>
+          <div class="modal-actions">
+            <button class="btn" id="btn-pass">Pass</button>
+            <button class="btn btn-primary" id="btn-buy">Buy</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- surprise / balkan event card (glassmorphism) -->
+      <div class="modal-overlay modal-card-overlay" id="modal-card" hidden>
+        <div class="modal modal-card-fx" id="card-fx">
+          <div class="cardfx-border" aria-hidden="true"></div>
+          <div class="cardfx-body">
+            <div class="cardfx-medal" id="card-icon"></div>
+            <span class="cardfx-deck" id="card-deck">Balkan Surprise</span>
+            <h2 class="cardfx-title" id="card-title">Surprise</h2>
+            <p class="cardfx-text" id="card-text"></p>
+            <div class="modal-actions modal-actions-col cardfx-actions" id="card-choices"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- property auction (house rule) -->
+      <div class="modal-overlay" id="modal-auction" hidden>
+        <div class="modal">
+          <div class="modal-flag" id="auc-colorbar"></div>
+          <p class="modal-sub" id="auc-kicker">Public Auction</p>
+          <h2 class="modal-title" id="auc-name">Property</h2>
+          <div class="auc-state">
+            <div class="auc-cell"><span>Bank price</span><b id="auc-price">&euro;0</b></div>
+            <div class="auc-cell"><span>High bid</span><b id="auc-high">&mdash;</b></div>
+            <div class="auc-cell"><span>Leader</span><b id="auc-leader">&mdash;</b></div>
+          </div>
+          <p class="modal-note" id="auc-note"></p>
+          <div class="trade-money auc-input">
+            <span class="trade-money__sign">&euro;</span>
+            <input type="number" id="auc-bid" min="0" step="10" value="0" />
+          </div>
+          <div class="stepper-row" id="auc-steppers">
+            <button class="step-btn" data-add="10" type="button">+10</button>
+            <button class="step-btn" data-add="50" type="button">+50</button>
+            <button class="step-btn" data-add="100" type="button">+100</button>
+          </div>
+          <div class="modal-actions">
+            <button class="btn" id="btn-auc-pass">Pass</button>
+            <button class="btn btn-primary" id="btn-auc-bid">Place Bid</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- jail -->
+      <div class="modal-overlay" id="modal-jail" hidden>
+        <div class="modal">
+          <div class="modal-card-icon" data-icon="bars"></div>
+          <h2 class="modal-title">In Prison</h2>
+          <p class="modal-note" id="jail-note"></p>
+          <div class="modal-actions modal-actions-col">
+            <button class="btn btn-primary" id="btn-jail-roll">Roll for doubles</button>
+            <button class="btn" id="btn-jail-pay">Pay EUR 50 bail</button>
+            <button class="btn" id="btn-jail-card" hidden>Use Get-Out-of-Jail card</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- build houses -->
+      <div class="modal-overlay" id="modal-build" hidden>
+        <div class="modal modal-build">
+          <h2 class="modal-title">Build Houses</h2>
+          <p class="modal-note">Own a full country to build. Houses must be built evenly.</p>
+          <div class="build-list" id="build-list"></div>
+          <div class="modal-actions">
+            <button class="btn btn-primary" id="btn-build-close">Done</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- trade composer -->
+      <div class="modal-overlay" id="modal-trade" hidden>
+        <div class="modal modal-trade">
+          <h2 class="modal-title">Propose a Trade</h2>
+
+          <div class="trade-parties">
+            <div class="trade-party">
+              <span class="trade-party__token" id="trade-me-token"></span>
+              <span class="trade-party__name" id="trade-me-name"></span>
+              <span class="trade-party__cash" id="trade-me-cash"></span>
+            </div>
+            <span class="trade-swap" data-icon="exchange"></span>
+            <div class="trade-party">
+              <span class="trade-party__token" id="trade-them-token"></span>
+              <select id="trade-target" class="trade-select"></select>
+              <span class="trade-party__cash" id="trade-them-cash"></span>
+            </div>
+          </div>
+
+          <div class="trade-columns">
+            <div class="trade-col">
+              <h3 class="trade-col-title">You give</h3>
+              <div class="trade-money">
+                <span class="trade-money__sign">&euro;</span>
+                <input type="number" id="trade-give-cash" min="0" step="10" value="0" />
+              </div>
+              <div class="stepper-row" data-stepper-for="give">
+                <button class="step-btn" type="button" data-add="10">+10</button>
+                <button class="step-btn" type="button" data-add="50">+50</button>
+                <button class="step-btn" type="button" data-add="100">+100</button>
+                <button class="step-btn step-btn--max" type="button" data-max>Max</button>
+              </div>
+              <input type="range" class="trade-slider" id="trade-give-slider" min="0" max="0" step="10" value="0" />
+              <input type="text" class="trade-filter" id="trade-give-filter" placeholder="Filter properties&hellip;" autocomplete="off" />
+              <div class="trade-props" id="trade-give-props"></div>
+            </div>
+            <div class="trade-col">
+              <h3 class="trade-col-title">You receive</h3>
+              <div class="trade-money">
+                <span class="trade-money__sign">&euro;</span>
+                <input type="number" id="trade-want-cash" min="0" step="10" value="0" />
+              </div>
+              <div class="stepper-row" data-stepper-for="want">
+                <button class="step-btn" type="button" data-add="10">+10</button>
+                <button class="step-btn" type="button" data-add="50">+50</button>
+                <button class="step-btn" type="button" data-add="100">+100</button>
+                <button class="step-btn step-btn--max" type="button" data-max>Max</button>
+              </div>
+              <input type="range" class="trade-slider" id="trade-want-slider" min="0" max="0" step="10" value="0" />
+              <input type="text" class="trade-filter" id="trade-want-filter" placeholder="Filter properties&hellip;" autocomplete="off" />
+              <div class="trade-props" id="trade-want-props"></div>
+            </div>
+          </div>
+
+          <div class="modal-actions">
+            <button class="btn" id="btn-trade-cancel">Cancel</button>
+            <button class="btn btn-primary" id="btn-trade-send">Send Offer</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- incoming trade -->
+      <div class="modal-overlay" id="modal-trade-incoming" hidden>
+        <div class="modal modal-trade">
+          <h2 class="modal-title">Incoming Trade</h2>
+          <p class="modal-sub" id="trade-incoming-from"></p>
+          <div class="trade-summary" id="trade-incoming-summary"></div>
+          <div class="modal-actions modal-actions-col">
+            <button class="btn btn-primary" id="btn-trade-accept">Accept</button>
+            <button class="btn" id="btn-trade-counter">Counter-offer</button>
+            <button class="btn" id="btn-trade-decline">Decline</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- game over -->
+      <div class="modal-overlay" id="modal-gameover" hidden>
+        <div class="modal">
+          <div class="modal-card-icon" data-icon="crown"></div>
+          <h2 class="modal-title" id="gameover-title">Game Over</h2>
+          <p class="modal-note" id="gameover-text"></p>
+          <div class="modal-actions">
+            <button class="btn btn-primary" onclick="location.reload()">Play Again</button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- socket.io client (served by server/relay.js; absent in plain dev mode) -->
+    <script src="/socket.io/socket.io.js"></script>
+
+    <!-- 3D dice physics libs: CDN first, local vendor fallback -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>window.THREE || document.write('<script src="js/vendor/three.min.js"><\/script>');</script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <script>window.CANNON || document.write('<script src="js/vendor/cannon.min.js"><\/script>');</script>
+
+    <!-- Game modules (classic scripts, ordered) -->
+    <script src="js/board-data.js"></script>
+    <script src="js/icons.js"></script>
+    <script src="js/tokens.js"></script>
+    <script src="js/sfx.js"></script>
+    <script src="js/dice3d.js"></script>
+    <script src="js/movement.js"></script>
+    <script src="js/cards.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/net.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/deed.js"></script>
+    <script src="js/buildings.js"></script>
+    <script src="js/lobby.js"></script>
+    <script src="js/mp.js"></script>
+    <script src="js/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+@theme {
+  --animate-wiggle: wiggle 0.18s ease-in-out infinite;
+  --animate-fadein: fadein 0.25s ease-out;
+}
+
+@keyframes wiggle {
+  0% { transform: rotate(-14deg) scale(0.94); }
+  50% { transform: rotate(12deg) scale(1.04) translateY(-6px); }
+  100% { transform: rotate(-10deg) scale(0.96); }
+}
+
+@keyframes fadein {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}

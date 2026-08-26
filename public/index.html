@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Balkanski Tajkun</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<style>
+/* ============================ TEMELJ ============================ */
+:root{
+  --bg:#0d120e;
+  --felt-a:#1c5138; --felt-b:#123526;
+  --panel:#141b16;
+  --panel-edge:#28382c;
+  --cream:#f2ead6; --cream-dk:#e4d9bc; --tile-edge:#b9ab88;
+  --ink:#23271f; --muted:#9db09c;
+  --gold:#d9a441; --gold-hi:#f0c56a;
+  --danger:#d95c4a; --ok:#57b26a;
+  --radius:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  background:
+    radial-gradient(1200px 700px at 50% -10%, #1a241c 0%, transparent 60%),
+    radial-gradient(900px 600px at 90% 110%, #14201a 0%, transparent 55%),
+    var(--bg);
+  color:var(--cream);
+  min-height:100vh;
+}
+button{font-family:inherit;cursor:pointer;border:none;border-radius:10px}
+input,select{font-family:inherit}
+.screen{display:none;min-height:100vh}
+.screen.active{display:flex}
+
+h1,h2,h3,.serif{font-family:Georgia,"Times New Roman",serif}
+.mono{font-variant-numeric:tabular-nums}
+
+.btn{
+  padding:.72rem 1.35rem;font-weight:700;letter-spacing:.06em;
+  background:#20301f;color:var(--cream);border:1px solid #37502f;
+  transition:transform .08s ease, filter .15s ease;
+}
+.btn:hover:not(:disabled){filter:brightness(1.15)}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:linear-gradient(180deg,var(--gold-hi),var(--gold));color:#231a05;border-color:#8a6a25}
+.btn.danger{background:#4a201b;border-color:#7a3a30}
+.btn.big{font-size:1.05rem;padding:.95rem 1.6rem}
+
+.field{
+  width:100%;padding:.7rem .9rem;border-radius:10px;font-size:1rem;
+  background:#0f1712;border:1px solid #33473a;color:var(--cream);
+}
+.field:focus{outline:2px solid var(--gold);border-color:transparent}
+.label{display:block;font-size:.78rem;letter-spacing:.14em;color:var(--muted);margin:.9rem 0 .35rem;text-transform:uppercase}
+
+/* ============================ POČETNA ============================ */
+#screen-home{align-items:center;justify-content:center;padding:1rem}
+.home-card{
+  width:min(430px,94vw);background:var(--panel);border:1px solid var(--panel-edge);
+  border-radius:20px;padding:2.2rem 2rem;box-shadow:0 30px 70px rgba(0,0,0,.55);
+}
+.logo{
+  text-align:center;margin-bottom:1.6rem;
+}
+.logo .crest{
+  width:64px;height:64px;margin:0 auto .9rem;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%, var(--gold-hi), #8a6a25);
+  display:flex;align-items:center;justify-content:center;
+  font-family:Georgia,serif;font-size:1.9rem;font-weight:700;color:#231a05;
+  box-shadow:inset 0 -4px 10px rgba(0,0,0,.4), 0 8px 24px rgba(217,164,65,.25);
+}
+.logo h1{font-size:2rem;letter-spacing:.12em;color:var(--gold)}
+.logo p{color:var(--muted);margin-top:.4rem;font-size:.92rem}
+.or-divider{display:flex;align-items:center;gap:.8rem;color:var(--muted);font-size:.8rem;letter-spacing:.2em;margin:1.2rem 0}
+.or-divider::before,.or-divider::after{content:"";flex:1;height:1px;background:#2c3a2f}
+.err-line{color:var(--danger);font-size:.88rem;min-height:1.2em;margin-top:.9rem;text-align:center}
+
+/* ============================ LOBBY ============================ */
+#screen-lobby{align-items:center;justify-content:center;padding:1rem}
+.lobby-card{
+  width:min(720px,95vw);background:var(--panel);border:1px solid var(--panel-edge);
+  border-radius:20px;padding:2rem;box-shadow:0 30px 70px rgba(0,0,0,.5);
+}
+.code-row{display:flex;align-items:center;justify-content:center;gap:1rem;margin:.4rem 0 1.4rem}
+.code-box{
+  font-family:Georgia,serif;font-size:2.4rem;letter-spacing:.45em;text-indent:.45em;
+  background:#0f1712;border:1px dashed #3c5340;border-radius:12px;padding:.5rem 1rem;color:var(--gold-hi)
+}
+.slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:.7rem;margin:.6rem 0 1.2rem}
+.slot{
+  display:flex;align-items:center;gap:.6rem;background:#0f1712;border:1px solid #2c3a2f;
+  border-radius:12px;padding:.65rem .8rem;min-height:3.2rem;
+}
+.slot .dot{width:18px;height:18px;border-radius:50%;flex:none;border:2px solid rgba(255,255,255,.75)}
+.slot .nm{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.slot .tag{margin-left:auto;font-size:.68rem;letter-spacing:.1em;color:var(--gold);text-transform:uppercase}
+.slot.empty{opacity:.4;justify-content:center;color:var(--muted);font-size:.85rem}
+.tokens-row{display:flex;flex-wrap:wrap;gap:.6rem}
+.tok{
+  display:flex;align-items:center;gap:.45rem;background:#0f1712;border:1px solid #2c3a2f;
+  border-radius:999px;padding:.42rem .85rem;color:var(--cream);font-size:.85rem;
+}
+.tok .dot{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.75)}
+.tok.selected{border-color:var(--gold);background:#1d2718}
+.tok:disabled{opacity:.35;cursor:not-allowed}
+.lobby-actions{display:flex;gap:.8rem;justify-content:center;margin-top:1.6rem;flex-wrap:wrap}
+
+/* ============================= IGRA ============================= */
+#screen-game{padding:.9rem;gap:.9rem}
+.game-layout{display:flex;gap:.9rem;width:100%;max-width:1500px;margin:0 auto;flex:1;min-height:0}
+.board-zone{flex:1;display:flex;align-items:center;justify-content:center;min-width:0}
+
+.board-wrap{position:relative;width:min(94vmin,calc(100vw - 400px),840px)}
+@media (max-width:1020px){.board-wrap{width:min(96vw,80vh)}}
+.board{
+  display:grid;grid-template-columns:repeat(11,1fr);grid-template-rows:repeat(11,1fr);
+  aspect-ratio:1;width:100%;border-radius:12px;overflow:hidden;
+  box-shadow:0 24px 70px rgba(0,0,0,.6), 0 0 0 6px #241d10, 0 0 0 8px #4a3b1c;
+  user-select:none;
+}
+.tile{
+  position:relative;background:var(--cream);border:.5px solid rgba(90,74,40,.55);
+  color:var(--ink);overflow:hidden;font-size:clamp(6px,1.05vmin,11px);
+  display:flex;flex-direction:column;
+}
+.tile .band{height:24%;flex:none;display:flex;align-items:center;justify-content:center;
+  font-weight:800;color:#fff;font-size:.9em;letter-spacing:.04em;text-shadow:0 1px 1px rgba(0,0,0,.4)}
+.tile .tname{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;
+  padding:2px 3px;font-weight:700;line-height:1.15;letter-spacing:.01em}
+.tile .tprice{font-size:.85em;text-align:center;padding-bottom:2px;color:#5c5138}
+.tile .own-strip{position:absolute;left:0;right:0;bottom:0;height:9%;}
+.tile.cornerside-top .own-strip{bottom:auto;top:0}
+.tile .builds{position:absolute;top:2px;right:2px;display:flex;gap:1px}
+.tile .builds .h{width:.55em;height:.55em;background:#1f8a3b;border:1px solid #0d4a20;border-radius:1px}
+.tile .builds .hotel{width:1.3em;height:.55em;background:#c0392b;border:1px solid #6e1f16;border-radius:1px}
+.tile.corner{
+  background:#efe4c8;font-weight:800;justify-content:center;align-items:center;text-align:center;
+  box-shadow:inset 0 0 0 3px rgba(138,106,37,.35);
+}
+.tile.corner .cname{font-size:.92em;letter-spacing:.04em;line-height:1.2;padding:2px}
+.tile.corner .csub{font-size:.72em;font-weight:600;color:#6d5f3f;margin-top:2px;padding:0 3px}
+.tile.corner.jail-tile{background:#e7dcc2}
+.tile.corner.goto-tile{background:#ecd9cf}
+.tile.special .band{height:26%}
+
+.board-center{
+  grid-area:2/2/11/11;position:relative;
+  background:
+    radial-gradient(60% 50% at 50% 42%, rgba(255,255,255,.07), transparent 70%),
+    linear-gradient(160deg,var(--felt-a),var(--felt-b));
+  box-shadow:inset 0 0 60px rgba(0,0,0,.45), inset 0 0 0 2px rgba(240,197,106,.25);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;
+}
+.center-brand{
+  text-align:center;color:rgba(242,234,214,.92);pointer-events:none;
+  text-shadow:0 2px 12px rgba(0,0,0,.5);
+}
+.center-brand h2{font-size:clamp(14px,2.6vmin,26px);letter-spacing:.35em;text-indent:.35em}
+.center-brand span{font-size:clamp(8px,1.4vmin,12px);letter-spacing:.3em;color:var(--gold-hi)}
+#dice-stage{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
+#turn-line{
+  position:absolute;top:4.5%;left:0;right:0;text-align:center;z-index:3;pointer-events:none;
+  font-weight:700;letter-spacing:.12em;font-size:clamp(10px,1.8vmin,15px);color:var(--cream);
+  text-shadow:0 1px 8px rgba(0,0,0,.6);
+}
+#roll-line{
+  position:absolute;bottom:4.5%;left:0;right:0;text-align:center;z-index:3;pointer-events:none;
+  font-family:Georgia,serif;font-size:clamp(11px,2.2vmin,20px);letter-spacing:.14em;color:var(--gold-hi);
+  text-shadow:0 1px 8px rgba(0,0,0,.6);min-height:1.4em;
+}
+#tokens-layer{position:absolute;inset:0;pointer-events:none;z-index:5}
+.pawn{
+  position:absolute;width:3.2%;aspect-ratio:1;border-radius:50%;
+  border:2px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,.5);
+  transform:translate(-50%,-58%);transition:left .1s linear,top .1s linear;
+  z-index:5;
+}
+.pawn.current::after{
+  content:"";position:absolute;left:50%;top:-38%;transform:translateX(-50%);
+  border:5px solid transparent;border-bottom-color:var(--gold-hi);
+}
+
+/* ------------------------- BOČNA TRAKA ------------------------- */
+.sidebar{width:360px;flex:none;display:flex;flex-direction:column;gap:.8rem;min-height:0}
+@media (max-width:1020px){
+  .game-layout{flex-direction:column;align-items:center}
+  .sidebar{width:min(96vw,840px)}
+}
+.panel{background:var(--panel);border:1px solid var(--panel-edge);border-radius:var(--radius);padding:.9rem 1rem}
+.panel h3{font-size:.78rem;letter-spacing:.22em;color:var(--muted);margin-bottom:.6rem;font-family:inherit}
+.players-list{display:flex;flex-direction:column;gap:.45rem}
+.pl-row{
+  display:flex;align-items:center;gap:.6rem;padding:.5rem .65rem;border-radius:10px;
+  background:#0f1712;border:1px solid #26332a;font-size:.92rem;
+}
+.pl-row.current{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold)}
+.pl-row.dead{opacity:.45}
+.pl-row .dot{width:14px;height:14px;border-radius:50%;flex:none;border:2px solid rgba(255,255,255,.7)}
+.pl-row .nm{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl-row .cash{font-weight:700;color:var(--gold-hi)}
+.badge-jail{font-size:.66rem;letter-spacing:.08em;background:#3a2b17;color:#e8b46a;border:1px solid #6b4c22;border-radius:6px;padding:.1rem .35rem}
+.badge-dead{font-size:.66rem;letter-spacing:.08em;background:#301616;color:#d99a8f;border:1px solid #6b2f2a;border-radius:6px;padding:.1rem .35rem}
+
+.actions{display:flex;flex-direction:column;gap:.5rem}
+.actions .btn{width:100%}
+.status-note{text-align:center;font-size:.82rem;color:var(--muted);min-height:1.1em}
+
+.build-list{display:flex;flex-direction:column;gap:.5rem;max-height:200px;overflow:auto}
+.build-item{display:flex;align-items:center;gap:.55rem;background:#0f1712;border:1px solid #26332a;border-radius:10px;padding:.4rem .55rem;font-size:.85rem}
+.build-item .swatch{width:10px;height:22px;border-radius:3px;flex:none}
+.build-item .bn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.build-item .lvl{color:var(--muted);font-size:.75rem}
+.mini{padding:.3rem .6rem;font-size:.75rem;letter-spacing:.04em}
+
+.log-panel{flex:1;min-height:140px;display:flex;flex-direction:column}
+.log-feed{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:.28rem;font-size:.84rem;line-height:1.35;scrollbar-width:thin}
+.log-feed div{color:#c8d4c6;padding:.18rem .5rem;border-left:2px solid #2c3a2f;background:rgba(255,255,255,.02)}
+.log-feed div.hl{color:var(--gold-hi);border-left-color:var(--gold)}
+
+/* --------------------------- DIJALOZI -------------------------- */
+.overlay{
+  position:fixed;inset:0;background:rgba(6,10,7,.72);backdrop-filter:blur(4px);
+  display:none;align-items:center;justify-content:center;z-index:50;padding:1rem;
+}
+.overlay.open{display:flex}
+.dialog{
+  width:min(520px,96vw);background:var(--panel);border:1px solid #3a5240;
+  border-radius:18px;padding:1.6rem;box-shadow:0 40px 90px rgba(0,0,0,.65);
+  animation:pop .18s ease-out;
+}
+@keyframes pop{from{transform:scale(.94);opacity:0}to{transform:scale(1);opacity:1}}
+.dialog h2{color:var(--gold);letter-spacing:.1em;font-size:1.25rem;margin-bottom:.8rem;text-align:center}
+.dialog .big-name{font-family:Georgia,serif;font-size:1.5rem;text-align:center;margin:.2rem 0 .4rem}
+.dialog .sub{text-align:center;color:var(--muted);font-size:.9rem}
+.dialog-actions{display:flex;gap:.8rem;justify-content:center;margin-top:1.4rem;flex-wrap:wrap}
+
+.card-dialog{border-color:var(--gold);text-align:center}
+.deck-tag{display:inline-block;font-size:.7rem;letter-spacing:.28em;color:#231a05;background:linear-gradient(180deg,var(--gold-hi),var(--gold));border-radius:6px;padding:.25rem .7rem;font-weight:800}
+.card-text{font-family:Georgia,serif;font-size:1.18rem;line-height:1.5;margin:1rem .4rem}
+
+/* --------------------------- TRGOVINA -------------------------- */
+.trade-dialog{width:min(860px,97vw)}
+.trade-cols{display:flex;gap:1rem;margin-top:.4rem}
+@media (max-width:820px){.trade-cols{flex-direction:column}}
+.trade-col{flex:1;background:#0f1712;border:1px solid #2c3a2f;border-radius:12px;padding:.85rem;min-width:0}
+.trade-col h4{font-size:.72rem;letter-spacing:.24em;color:var(--muted);margin-bottom:.6rem}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;min-height:2.2rem}
+.chip{
+  display:inline-flex;align-items:center;gap:.4rem;border-radius:999px;padding:.32rem .7rem;
+  background:#16221a;border:1px solid #33473a;color:var(--cream);font-size:.8rem;font-weight:600;
+}
+.chip .sw{width:9px;height:9px;border-radius:3px}
+.chip.on{border-color:var(--gold);background:#2a2413;color:var(--gold-hi)}
+.money-row{display:flex;align-items:center;gap:.7rem;margin-top:.9rem}
+.money-row input[type=range]{flex:1;accent-color:var(--gold)}
+.money-input{
+  width:110px;padding:.45rem .6rem;border-radius:8px;background:#0b120d;
+  border:1px solid #33473a;color:var(--gold-hi);font-weight:700;text-align:right;
+}
+.trade-target{margin-bottom:.7rem}
+.trade-note{font-size:.76rem;color:var(--muted);text-align:center;margin-top:.9rem}
+
+.incoming-list{background:#0f1712;border:1px solid #2c3a2f;border-radius:10px;padding:.6rem .8rem;font-size:.9rem}
+.incoming-list h5{font-size:.68rem;letter-spacing:.2em;color:var(--muted);margin:.3rem 0 .35rem}
+.incoming-list ul{list-style:none}
+.incoming-list li{padding:.12rem 0}
+
+/* --------------------------- GAME OVER ------------------------- */
+.over-title{font-family:Georgia,serif;font-size:2rem;color:var(--gold);text-align:center;letter-spacing:.14em}
+.winner-line{text-align:center;font-size:1.25rem;margin:.8rem 0 1.2rem}
+
+/* ---------------------------- TOAST ---------------------------- */
+#toast{
+  position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);z-index:99;
+  background:#2a1815;border:1px solid #7a3a30;color:#f2c4ba;padding:.7rem 1.2rem;
+  border-radius:10px;font-size:.9rem;opacity:0;transition:.25s ease;pointer-events:none;max-width:90vw;
+}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+#toast.info{background:#15251a;border-color:#3a6b47;color:#c9e8cf}
+</style>
+</head>
+<body>
+
+<!-- ============================ POČETNI EKRAN ============================ -->
+<section id="screen-home" class="screen active">
+  <div class="home-card">
+    <div class="logo">
+      <div class="crest">BT</div>
+      <h1>BALKANSKI TAJKUN</h1>
+      <p>Vlasnička igra na balkanski način</p>
+    </div>
+    <label class="label" for="inp-name">Tvoje ime</label>
+    <input id="inp-name" class="field" maxlength="16" placeholder="Upiši svoje ime" autocomplete="off" />
+    <button id="btn-create" class="btn primary big" style="width:100%;margin-top:1.1rem">STVORI SOBU</button>
+    <div class="or-divider">ILI</div>
+    <label class="label" for="inp-code" style="margin-top:0">Šifra sobe</label>
+    <input id="inp-code" class="field" maxlength="5" placeholder="5 slova" autocapitalize="characters" style="text-transform:uppercase;letter-spacing:.35em;text-align:center" />
+    <button id="btn-join" class="btn big" style="width:100%;margin-top:.9rem">PRIDRUŽI SE SOBI</button>
+    <div id="home-err" class="err-line"></div>
+  </div>
+</section>
+
+<!-- ============================== LOBBY ================================= -->
+<section id="screen-lobby" class="screen">
+  <div class="lobby-card">
+    <h2 class="serif" style="text-align:center;letter-spacing:.2em;color:var(--gold)">SOBA</h2>
+    <div class="code-row">
+      <div id="lobby-code" class="code-box">-----</div>
+      <button id="btn-copy" class="btn">KOPIRAJ</button>
+    </div>
+    <h3 style="font-size:.78rem;letter-spacing:.22em;color:var(--muted)">IGRAČI</h3>
+    <div id="lobby-slots" class="slots"></div>
+    <h3 style="font-size:.78rem;letter-spacing:.22em;color:var(--muted)">IZABERI SVOJU BOJU</h3>
+    <div id="lobby-tokens" class="tokens-row"></div>
+    <div class="lobby-actions">
+      <button id="btn-start" class="btn primary big" disabled>POČNI IGRAJU</button>
+      <button id="btn-leave" class="btn danger">NAPUSTI SOBU</button>
+    </div>
+    <p id="lobby-note" style="text-align:center;color:var(--muted);font-size:.85rem;margin-top:1rem"></p>
+  </div>
+</section>
+
+<!-- ================================ IGRA ================================ -->
+<section id="screen-game" class="screen">
+  <div class="game-layout">
+    <div class="board-zone">
+      <div class="board-wrap">
+        <div id="board" class="board"></div>
+        <div id="tokens-layer"></div>
+      </div>
+    </div>
+    <aside class="sidebar">
+      <div class="panel">
+        <h3>IGRAČI</h3>
+        <div id="players-list" class="players-list"></div>
+      </div>
+      <div class="panel actions-panel">
+        <h3>AKCIJE</h3>
+        <div id="actions" class="actions"></div>
+        <div id="status-note" class="status-note" style="margin-top:.5rem"></div>
+      </div>
+      <div class="panel" id="build-panel" style="display:none">
+        <h3>GRADNJA — KUĆE I HOTEL</h3>
+        <div id="build-list" class="build-list"></div>
+      </div>
+      <div class="panel log-panel">
+        <h3>DNEVNIK</h3>
+        <div id="log-feed" class="log-feed"></div>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================ DIALOGI ============================ -->
+
+<div id="modal-buy" class="overlay">
+  <div class="dialog">
+    <h2>KUPNJA NEKRETNINE</h2>
+    <div id="buy-name" class="big-name"></div>
+    <div id="buy-sub" class="sub"></div>
+    <div class="dialog-actions">
+      <button id="btn-buy" class="btn primary big"></button>
+      <button id="btn-skip" class="btn big">PRESKOČI</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-card" class="overlay">
+  <div class="dialog card-dialog">
+    <span id="card-deck" class="deck-tag"></span>
+    <p id="card-text" class="card-text"></p>
+    <div class="dialog-actions">
+      <button id="btn-card-ok" class="btn primary big">U REDU</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-trade-incoming" class="overlay">
+  <div class="dialog">
+    <h2>PONUDA ZA RAZMJENU</h2>
+    <p id="ti-from" class="sub"></p>
+    <div style="display:flex;gap:.8rem;flex-direction:column;margin-top:.9rem">
+      <div class="incoming-list"><h5>PRIMAŠ</h5><ul id="ti-get"></ul></div>
+      <div class="incoming-list"><h5>DAJEŠ</h5><ul id="ti-give"></ul></div>
+    </div>
+    <div class="dialog-actions">
+      <button id="btn-trade-accept" class="btn primary big">PRIHVATI</button>
+      <button id="btn-trade-decline" class="btn danger big">ODBIJ</button>
+    </div>
+  </div>
+</div>
+
+<div id="overlay-trade" class="overlay">
+  <div class="dialog trade-dialog">
+    <h2>TRGOVINA</h2>
+    <div class="trade-cols">
+      <div class="trade-col">
+        <h4>DAJEŠ</h4>
+        <div id="tt-give-chips" class="chips"></div>
+        <div class="money-row">
+          <input id="tt-give-range" type="range" min="0" max="1500" step="10" value="0" />
+          <input id="tt-give-money" class="money-input" type="number" min="0" step="10" value="0" />
+        </div>
+      </div>
+      <div class="trade-col">
+        <h4>TRAŽIŠ</h4>
+        <div class="trade-target">
+          <label class="label" for="tt-target" style="margin-top:0">Igrač</label>
+          <select id="tt-target" class="field"></select>
+        </div>
+        <div id="tt-get-chips" class="chips"></div>
+        <div class="money-row">
+          <input id="tt-get-range" type="range" min="0" max="1500" step="10" value="0" />
+          <input id="tt-get-money" class="money-input" type="number" min="0" step="10" value="0" />
+        </div>
+      </div>
+    </div>
+    <p class="trade-note">Ponuda istječe nakon 60 sekundi. Polja sa zgradama ne mogu se mijenjati.</p>
+    <div class="dialog-actions">
+      <button id="btn-trade-send" class="btn primary big">POŠALJI PONUDU</button>
+      <button id="btn-trade-cancel" class="btn big">ODUSTANI</button>
+    </div>
+  </div>
+</div>
+
+<div id="overlay-gameover" class="overlay">
+  <div class="dialog">
+    <div class="over-title">KRAJ IGRE</div>
+    <div id="over-winner" class="winner-line"></div>
+    <div class="dialog-actions">
+      <button id="btn-restart" class="btn primary big" style="display:none">IGRAJ PONOVO</button>
+    </div>
+    <p id="over-wait" class="sub" style="display:none">Čekaš da domaćin pokrene novu igru.</p>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/vendor/three.min.js"></script>
+<script src="/vendor/cannon.min.js"></script>
+<script src="/app.js" defer></script>
+</body>
+</html>

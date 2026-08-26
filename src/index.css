@@ -1,0 +1,24 @@
+@import "tailwindcss";
+@import "./animations.css";
+
+@theme {
+  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --color-night-950: #0c0a14;
+  --color-night-900: #14111f;
+  --color-night-800: #1d1830;
+  --color-night-700: #2a2344;
+  --color-night-600: #3a3159;
+  --color-accent: #f4b73f;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-night-950);
+  color: #ece9f5;
+  overflow: hidden;
+}
