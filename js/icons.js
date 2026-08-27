@@ -45,6 +45,12 @@
     arrowUp: '<path d="M12 20V4.5"/><path d="m6 10.5 6-6 6 6"/>',
     check: '<path d="m4.5 12.5 5 5 10-11"/>',
     x: '<path d="M5.5 5.5l13 13m0-13-13 13"/>',
+    /* Filled building piece, shaped like the moulded Monopoly plastic: gable
+     * roof with overhanging eaves. Solid, because the stroke icons above turn
+     * to mush at the 8-15px sizes the tile pips and chips render at. Houses and
+     * hotels share this one silhouette and differ only in colour and size,
+     * exactly like the real green houses and red hotels. */
+    houseSolid: '<path fill="currentColor" stroke="none" d="M12 2.4 23.4 11.7h-3.2v9.9H3.8v-9.9H0.6L12 2.4z"/>',
     /* filled player token */
     meeple: '<path fill="currentColor" stroke="none" d="M12 2.1a3.5 3.5 0 0 0-3.5 3.5c0 1 .45 1.95 1.17 2.56C6.05 9.3 4.3 11.4 4.3 13.95h5.25L7.8 21.9h8.4l-1.75-7.95h5.25c0-2.55-1.75-4.65-5.37-5.79A3.49 3.49 0 0 0 12 2.1z"/>',
     /* lobby / cards additions (all emoji-free) */

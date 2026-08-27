@@ -5,10 +5,13 @@
  * is pinned exactly over the CSS board; building bases are projected from
  * each tile's color-banner zone so they always align, at any board size.
  *
- *   Houses (1-4): green gable cottages (#10B981) with white roof trim,
- *                 chimney and door; laid out side by side with 2px gaps.
- *   Hotel  (max 1): blue modern resort (#3B82F6), multi-tiered roof,
- *                 window grid, entrance with awning; replaces the houses.
+ * Pieces follow the physical Monopoly set: houses are small green gable
+ * cottages, the hotel is one big red building of the same shape. Same
+ * silhouette, different size and colour — that is what makes them readable
+ * as a pair at ~18px on screen.
+ *
+ *   Houses (1-4): green (--house), laid out side by side with 2px gaps.
+ *   Hotel  (max 1): red (--hotel), roughly twice the footprint; replaces them.
  *   New pieces drop in from Y + drop height with an easeOutBounce bounce.
  * ========================================================================== */
 
@@ -39,7 +42,16 @@
   const dying = [];         // { group, t0, dur }
   let rafId = 0;
 
-  const houseW = () => tilePx * 0.185;
+  /* Piece dimensions as fractions of a tile's short side. The hotel is the
+   * same shape scaled up, so the two never read as different objects. */
+  /* Walls are deliberately tall relative to the footprint: the camera looks
+   * down at 58 degrees, so a low building shows almost no wall and flattens
+   * into its own roof. The hotel gains depth as well as width, so it reads as
+   * a bigger building rather than a wider slab. */
+  const HOUSE = { w: 0.185, d: 0.160, wall: 0.100, roof: 0.082, chim: 0.030 };
+  const HOTEL = { w: 0.300, d: 0.215, wall: 0.132, roof: 0.104, chim: 0.036 };
+
+  const houseW = () => tilePx * HOUSE.w;
 
   /* ---------- easing ---------- */
 
@@ -53,20 +65,19 @@
 
   /* ---------- shared materials ---------- */
 
+  /* Matte moulded-plastic look: high roughness, no metalness, no emissive.
+   * Roofs are a darker shade of the same hue rather than a contrasting colour,
+   * so the roof plane separates from the walls without the piece turning into
+   * two-tone noise at small sizes. */
   let MATS = null;
   function materials() {
     if (MATS) return MATS;
+    const plastic = (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.62, metalness: 0 });
     MATS = {
-      wall: new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.55, metalness: 0.04 }),
-      roof: new THREE.MeshStandardMaterial({ color: 0x0d9166, roughness: 0.6 }),
-      trim: new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.45 }),
-      chimney: new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.85 }),
-      door: new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 }),
-      hotelWall: new THREE.MeshStandardMaterial({ color: 0x3b82f6, roughness: 0.42, metalness: 0.08 }),
-      glass: new THREE.MeshStandardMaterial({
-        color: 0xbfdbfe, roughness: 0.18, metalness: 0.35,
-        emissive: 0x1e3a5f, emissiveIntensity: 0.35,
-      }),
+      houseWall: plastic(0x18a957),
+      houseRoof: plastic(0x0e7a3c),
+      hotelWall: plastic(0xe1362c),
+      hotelRoof: plastic(0xa81e17),
     };
     return MATS;
   }
@@ -99,88 +110,59 @@
     return m;
   }
 
-  /* ---------- procedural house: green cottage, white trim, chimney ---------- */
+  /**
+   * Gable roof over a w x d footprint.
+   *
+   * gableGeometry puts the ridge on Z, and every piece ends up yawed to
+   * VIEW_YAW, so Z runs toward the camera. That orientation is load-bearing
+   * for legibility and must not be "corrected": with the ridge receding from
+   * the viewer you see a wall rectangle, the gable triangle above it, and both
+   * roof slopes catching different amounts of light — which is what reads as a
+   * house. Turn the ridge across the screen instead and all four of those
+   * collapse into one slanted plane that looks like a flat coloured slab.
+   */
+  function gableRoofMesh(w, h, d, mat) {
+    return mesh(gableGeometry(w, h, d), mat);
+  }
 
-  function makeHouse() {
-    const M = materials();
+  /* ---------- the piece: walls, gable roof, chimney ----------
+   * Houses and hotels are the same three parts at different scales. The old
+   * versions carried white trim rings, doors, a window grid and an awning on
+   * pillars; at the ~18px a piece actually occupies on screen none of that
+   * resolved into anything but visual noise, so it is gone. What is left is
+   * the silhouette, which is the only thing legible at this size. */
+
+  function makePiece(spec, wallMat, roofMat) {
     const T = tilePx;
     const g = new THREE.Group();
+    const w = T * spec.w, d = T * spec.d;
+    const wallH = T * spec.wall, roofH = T * spec.roof;
 
-    const w = T * 0.185, d = T * 0.155, wallH = T * 0.105, roofH = T * 0.075;
-    const t = Math.max(1.1, T * 0.02); // trim thickness
-
-    const body = mesh(new THREE.BoxGeometry(w, wallH, d), M.wall);
+    const body = mesh(new THREE.BoxGeometry(w, wallH, d), wallMat);
     body.position.y = wallH / 2;
     g.add(body);
 
-    const roof = mesh(gableGeometry(w * 1.14, roofH, d * 1.18), M.roof);
+    // eaves overhang the walls slightly, which is what reads as "house"
+    const roof = gableRoofMesh(w * 1.08, roofH, d * 1.12, roofMat);
     roof.position.y = wallH;
     g.add(roof);
 
-    // white trim ring under both eaves + ridge beam along the top
-    g.add(mesh(new THREE.BoxGeometry(w * 1.17, t, d * 1.21), M.trim, 0, wallH - t / 2));
-    g.add(mesh(new THREE.BoxGeometry(w * 1.2, t, t), M.trim, 0, wallH + roofH));
-
-    // chimney on one roof slope, with a darker cap
-    const chX = w * 0.26, chH = wallH * 0.95;
-    g.add(mesh(new THREE.BoxGeometry(t * 2.1, chH, t * 2.1), M.chimney, chX, wallH + roofH * 0.55));
-    g.add(mesh(new THREE.BoxGeometry(t * 2.7, t * 0.9, t * 2.7), M.door, chX, wallH + roofH * 0.55 + chH / 2));
-
-    // front door
-    g.add(mesh(new THREE.BoxGeometry(w * 0.26, wallH * 0.62, 0.6), M.door, -w * 0.12, wallH * 0.31, d / 2));
+    // chimney set on one roof slope, tall enough to clear the ridge line
+    const c = Math.max(1.2, T * spec.chim);
+    g.add(mesh(new THREE.BoxGeometry(c, roofH, c), wallMat,
+      w * 0.27, wallH + roofH * 0.9, -d * 0.12));
 
     return g;
   }
 
-  /* ---------- procedural hotel: blue multi-tier resort ---------- */
+  function makeHouse() {
+    const M = materials();
+    return makePiece(HOUSE, M.houseWall, M.houseRoof);
+  }
 
   function makeHotel() {
     const M = materials();
-    const T = tilePx;
-    const g = new THREE.Group();
-
-    const w = T * 0.34, d = T * 0.205;
-    const h1 = T * 0.15, h2 = T * 0.085;
-    const t = Math.max(1, T * 0.016);
-
-    const tier1 = mesh(new THREE.BoxGeometry(w, h1, d), M.hotelWall);
-    tier1.position.y = h1 / 2;
-    g.add(tier1);
-
-    // second tier setback (multi-tiered silhouette)
-    const tier2 = mesh(new THREE.BoxGeometry(w * 0.6, h2, d * 0.72), M.hotelWall);
-    tier2.position.set(-w * 0.06, h1 + h2 / 2, -d * 0.06);
-    g.add(tier2);
-
-    // white slab roofs capping both tiers
-    g.add(mesh(new THREE.BoxGeometry(w * 1.05, t, d * 1.05), M.trim, 0, h1 + t / 2));
-    g.add(mesh(new THREE.BoxGeometry(w * 0.64, t, d * 0.76), M.trim, -w * 0.06, h1 + h2 + t / 2, -d * 0.06));
-
-    // window grid on the main facade (glass panes slightly proud of the wall)
-    const pane = Math.max(1.2, T * 0.032);
-    const rows = Math.max(2, Math.floor(h1 / (pane * 1.9)));
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < 4; c++) {
-        const wx = -w * 0.33 + c * (w * 0.22);
-        const wy = h1 * 0.28 + r * ((h1 * 0.52) / Math.max(rows - 1, 1));
-        g.add(mesh(new THREE.BoxGeometry(pane, pane * 1.25, 0.5), M.glass, wx, wy, d / 2, false));
-      }
-    }
-    for (let c = 0; c < 2; c++) {
-      g.add(mesh(
-        new THREE.BoxGeometry(pane, pane * 1.1, 0.5), M.glass,
-        -w * 0.24 + c * (w * 0.24), h1 + h2 * 0.5, d * 0.30, false,
-      ));
-    }
-
-    // ground-floor entrance: recessed door + awning slab on pillars
-    const doorW = w * 0.2;
-    g.add(mesh(new THREE.BoxGeometry(doorW, h1 * 0.42, 0.7), M.door, w * 0.26, h1 * 0.21, d / 2));
-    g.add(mesh(new THREE.BoxGeometry(doorW * 1.7, t, d * 0.16), M.trim, w * 0.26, h1 * 0.46, d / 2 + d * 0.07));
-    g.add(mesh(new THREE.BoxGeometry(t, h1 * 0.44, t), M.trim, w * 0.26 - doorW * 0.75, h1 * 0.22, d / 2 + d * 0.13));
-    g.add(mesh(new THREE.BoxGeometry(t, h1 * 0.44, t), M.trim, w * 0.26 + doorW * 0.75, h1 * 0.22, d / 2 + d * 0.13));
-
-    return g;
+    return makePiece(HOTEL, M.hotelWall, M.hotelRoof);
   }
 
   /* ---------- layout: piece offsets inside a tile ----------

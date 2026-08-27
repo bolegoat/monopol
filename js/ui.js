@@ -39,6 +39,64 @@
     return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
   }
 
+  /**
+   * Ink colour for text sitting on `hex`: whichever of near-black or white has
+   * more contrast against it. Uses real sRGB relative luminance, not a
+   * brightness average, because the two disagree badly on saturated hues.
+   *
+   * The 0.1791 threshold is the exact crossover where white and black give
+   * equal WCAG contrast (solve 1.05/(L+0.05) = (L+0.05)/0.05). Every colour in
+   * the current seat palette lands above it and so takes dark ink; the branch
+   * exists for custom or relayed seat colours that may be genuinely dark.
+   */
+  function inkOn(hex) {
+    let h = String(hex).replace("#", "");
+    if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+    const n = parseInt(h, 16);
+    const lin = (v) => {
+      const c = v / 255;
+      return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    };
+    const L = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+    return L > 0.1791 ? "#0b0f16" : "#ffffff";
+  }
+
+  /** First letter of a player name, for the ownership plate. */
+  const initialOf = (name) => (String(name || "").trim().charAt(0) || "?").toUpperCase();
+
+  /* Plate tags, memoised per game in a WeakMap rather than on the game object,
+   * which would ride along into serialize() and out over the wire. */
+  const tagCache = new WeakMap();
+
+  /**
+   * A short, unique tag per player for the ownership plate.
+   *
+   * An initial is the friendly choice, but it is not always unique — the
+   * default roster is "Player 1".."Player 4", which all collide on P, and two
+   * humans called Marko and Milan collide just as hard. So any initial shared
+   * by more than one player falls back to that player's seat number. Unique
+   * initials are left alone, because "Z" on Zagreb beats "3".
+   */
+  function plateTags(game) {
+    let tags = tagCache.get(game);
+    if (tags) return tags;
+    // never cache an empty roster: a snapshot could arrive mid-hydration and
+    // we would pin blank tags for the rest of the match
+    if (!game.players || !game.players.length) return new Map();
+    const seen = new Map();
+    for (const p of game.players) {
+      const i = initialOf(p.name);
+      seen.set(i, (seen.get(i) || 0) + 1);
+    }
+    tags = new Map();
+    for (const p of game.players) {
+      const i = initialOf(p.name);
+      tags.set(p.id, seen.get(i) > 1 ? String((p.seat || 0) + 1) : i);
+    }
+    tagCache.set(game, tags);
+    return tags;
+  }
+
   /* ================= Board rendering ================= */
 
   /* The prison is the one corner with real internals: a barred cell leaning
@@ -159,19 +217,28 @@
         : tile.name;
       // group color for the hover glow (set as custom props)
       el.style.setProperty("--gc-55", hexA(kindColor(tile), 0.5));
-      // inward-facing card: content + strips rotate/invert per edge via CSS
+      // inward-facing card: content + strips rotate/invert per edge via CSS.
+      // Only buyable tiles get an ownership plate — a corner or a tax square
+      // can never change hands, so it would be dead markup on 12 of 40 tiles.
+      const buyable = tile.kind === "city" || tile.kind === "airport" || tile.kind === "utility";
       el.innerHTML =
         '<div class="tile__card">' +
           tileInnerHTML(tile) +
           '<div class="tile__tint"></div>' +
-          '<div class="tile__owner"></div>' +
+          (buyable
+            ? '<div class="tile__owner">' +
+                '<span class="tile__crown" aria-hidden="true">' + icon("crown") + "</span>" +
+                '<span class="tile__ownertag"></span>' +
+              "</div>"
+            : "") +
         "</div>";
 
       board.appendChild(el);
       UI.tileEls[index] = el;
       UI.tileParts.set(tile.id, {
         el,
-        ownerBar: el.querySelector(".tile__owner"),
+        ownerTag: el.querySelector(".tile__ownertag"),
+        priceEl: el.querySelector(".tile__price"),
         housesBox: el.querySelector("[data-houses]"),
       });
     });
@@ -202,30 +269,123 @@
     setTimeout(() => el.classList.remove("is-active"), 1200);
   };
 
-  /** Repaint ownership strips + house pips + player-color state from engine. */
+  /* -------------------------------------------------------------------------
+   * Ownership on the board
+   *
+   * A 4px hairline is not enough to answer "whose is that?" from across the
+   * table, so a claimed plot is marked three ways at once, each readable at a
+   * different distance:
+   *
+   *   ring + wash   a 2px seat-colour ring around the tile and a colour wash
+   *                 falling from the inner edge — peripheral vision, tells you
+   *                 the plot is taken before you focus on it
+   *   owner plate   a solid seat-colour band on the inner rim carrying the
+   *                 owner's initial in auto-contrast ink — colour alone fails
+   *                 when two seats sit close on the wheel, and it also covers
+   *                 colour-blind players
+   *   rent readout  the price pill becomes the live rent in the owner's colour,
+   *                 so the cost of landing there is on the board, not in a modal
+   *
+   * A completed country adds a crown to the plate and brightens the ring, since
+   * a full set is the single most important thing to notice on the board.
+   * ---------------------------------------------------------------------- */
+
+  const OC_PROPS = ["--oc", "--oc-ink", "--oc-24", "--oc-55", "--oc-glow"];
+
+  /** Does `owner` hold every tile of this tile's set (country, or all airports/utilities)? */
+  function ownsFullSet(game, tile, owner) {
+    if (!owner) return false;
+    if (tile.kind === "city") return game.ownsGroup(owner, tile.country);
+    return TILES.filter((t) => t.kind === tile.kind)
+      .every((t) => game.props[t.id].owner === owner.id);
+  }
+
+  /**
+   * What landing here costs right now, short enough for the price pill.
+   * Utilities are dice-multiplied, so they show the multiplier instead of a
+   * number that would be a lie until the dice land.
+   */
+  function rentLabel(game, tile, ps) {
+    if (tile.kind === "utility") {
+      const n = TILES.filter((t) => t.kind === "utility" && game.props[t.id].owner === ps.owner).length;
+      return "\u00d7" + ECONOMY.utilityMultipliers[Math.min(Math.max(n, 1), 2) - 1];
+    }
+    return "\u20ac" + game.rentFor(tile);
+  }
+
+  /** Hover tooltip: everything about the plot in one line. */
+  function tileTitle(game, tile, ps, owner, mono) {
+    const base = tile.kind === "city"
+      ? tile.name + ", " + COUNTRIES[tile.country].name
+      : tile.name;
+    if (!owner) return base + " \u2014 \u20ac" + tile.price + ", unowned";
+    const h = ps.houses || 0;
+    const dev = tile.kind !== "city" ? ""
+      : h >= ECONOMY.maxHouses ? ", hotel"
+      : h ? ", " + h + (h > 1 ? " houses" : " house")
+      : "";
+    const rent = rentLabel(game, tile, ps) + (tile.kind === "utility" ? " the dice roll" : "");
+    return base + " \u2014 " + owner.name + (mono ? " (full set)" : "") + dev + ", rent " + rent;
+  }
+
+  /** Repaint one tile's ownership layers. No-ops unless something changed. */
+  function paintOwnership(game, tile, ps, owner, parts) {
+    const el = parts.el;
+    const mono = ownsFullSet(game, tile, owner);
+    const rent = owner ? rentLabel(game, tile, ps) : "";
+    // rent is in the signature because a neighbour changing hands can move
+    // this tile's rent (airport ladder, utility multiplier, set bonus)
+    const tag = owner ? plateTags(game).get(owner.id) || "" : "";
+    const sig = owner ? owner.id + "|" + owner.color + "|" + tag + "|" + rent + "|" + (mono ? 1 : 0) : "";
+    if (parts.ownSig === sig) return;
+    parts.ownSig = sig;
+
+    el.classList.toggle("is-owned", Boolean(owner));
+    el.classList.toggle("is-monopoly", mono);
+
+    if (owner) {
+      el.style.setProperty("--oc", owner.color);
+      el.style.setProperty("--oc-ink", inkOn(owner.color));
+      el.style.setProperty("--oc-24", hexA(owner.color, 0.24));
+      el.style.setProperty("--oc-55", hexA(owner.color, 0.55));
+      el.style.setProperty("--oc-glow", hexA(owner.color, 0.55));
+    } else {
+      // clear, or a sold-off tile keeps glowing in its old owner's colour
+      for (const prop of OC_PROPS) el.style.removeProperty(prop);
+    }
+
+    if (parts.ownerTag) parts.ownerTag.textContent = tag;
+    if (parts.priceEl) {
+      parts.priceEl.textContent = owner ? "R " + rent : "\u20ac" + tile.price;
+      parts.priceEl.classList.toggle("tile__price--rent", Boolean(owner));
+    }
+    // aria-label, not title: deed.js draws its own hover card for property
+    // tiles and strips `title` so the two tooltips cannot both appear. Keeping
+    // the text on aria-label preserves it for screen readers.
+    el.removeAttribute("title");
+    el.setAttribute("aria-label", tileTitle(game, tile, ps, owner, mono));
+  }
+
+  /** Repaint ownership layers + house pips from engine state. */
   UI.renderTiles = function (game) {
     for (const [tileId, parts] of UI.tileParts) {
       const ps = game.props[tileId];
       const tile = tileById(tileId);
       if (!ps) continue;
       const owner = ps.owner ? game.player(ps.owner) : null;
-      if (owner) {
-        parts.el.classList.add("is-owned");
-        parts.el.style.setProperty("--oc-15", hexA(owner.color, 0.16));
-        parts.el.style.setProperty("--oc-glow", hexA(owner.color, 0.55));
-      } else {
-        parts.el.classList.remove("is-owned");
-      }
-      parts.ownerBar.style.background = owner ? owner.color : "transparent";
-      parts.ownerBar.classList.toggle("is-owned", Boolean(owner));
+      paintOwnership(game, tile, ps, owner, parts);
+
       if (parts.housesBox && tile.kind === "city") {
         // The 3D overlay owns the buildings when WebGL is up; the flat pips are
         // only a fallback so a no-WebGL browser still shows development level.
         const flat = !(window.BT.Buildings && window.BT.Buildings.active());
         const n = flat ? ps.houses : 0;
-        parts.housesBox.innerHTML = n >= 4
-          ? icon("building", "ic-house ic-hotel")
-          : Array.from({ length: n }, () => icon("house", "ic-house")).join("");
+        if (parts.hSig !== n) {
+          parts.hSig = n;
+          parts.housesBox.innerHTML = n >= ECONOMY.maxHouses
+            ? icon("houseSolid", "ic-house ic-hotel")
+            : Array.from({ length: n }, () => icon("houseSolid", "ic-house")).join("");
+        }
       }
     }
     // keep the 3D houses/hotels overlay in step with engine state
@@ -282,18 +442,21 @@
     }).join("");
   }
 
-  /* Compact asset counters — only what the player actually has. */
+  /* Compact asset counters — only what the player actually has. Houses and
+   * hotels use the same piece glyph, tinted green and red, so the counters
+   * match the pieces standing on the board. */
   const ASSETS = [
-    ["houses", "house"],
-    ["hotels", "star"],
-    ["airports", "plane"],
-    ["utilities", "zap"],
+    ["houses", "houseSolid", "pa--house"],
+    ["hotels", "houseSolid", "pa--hotel"],
+    ["airports", "plane", ""],
+    ["utilities", "zap", ""],
   ];
 
   function assetRow(h, p) {
     const cells = ASSETS
       .filter(([k]) => h[k] > 0)
-      .map(([k, ic]) => '<span class="pa">' + icon(ic, "ic-pa") + h[k] + "</span>");
+      .map(([k, ic, cls]) =>
+        '<span class="pa' + (cls ? " " + cls : "") + '">' + icon(ic, "ic-pa") + h[k] + "</span>");
     if (p.getOutCards > 0) {
       cells.push('<span class="pa pa--key" title="Get-Out-of-Jail">' + icon("key", "ic-pa") + p.getOutCards + "</span>");
     }
@@ -808,9 +971,12 @@
           const ps = game.props[tileId];
           const row = document.createElement("div");
           row.className = "build-row";
-          const houses = ps.houses >= 4
-            ? icon("building", "ic-chip") + " Hotel"
-            : ps.houses > 0 ? Array.from({ length: ps.houses }, () => icon("house", "ic-chip")).join("") : "none";
+          const houses = ps.houses >= ECONOMY.maxHouses
+            ? icon("houseSolid", "ic-chip ic-chip--hotel") + " Hotel"
+            : ps.houses > 0
+              ? Array.from({ length: ps.houses },
+                () => icon("houseSolid", "ic-chip ic-chip--house")).join("")
+              : "none";
           row.innerHTML =
             '<span class="build-row__color" style="background:' + c.color + '"></span>' +
             '<span><span class="build-row__name">' + tile.name + '</span><br>' +
@@ -1136,8 +1302,8 @@
         : '<i class="tc-dot" style="background:' + kindColor(t) + '"></i>';
       const h = game.props[t.id].houses || 0;
       const pips = h >= ECONOMY.maxHouses
-        ? icon("star", "ic-inv")
-        : Array.from({ length: h }, () => icon("house", "ic-inv")).join("");
+        ? icon("houseSolid", "ic-inv ic-inv--hotel")
+        : Array.from({ length: h }, () => icon("houseSolid", "ic-inv ic-inv--house")).join("");
       return '<span class="inv-cell' + (marked.has(t.id) ? " is-" + mark : "") + '">' +
         lead + esc(t.name) + pips + "</span>";
     });

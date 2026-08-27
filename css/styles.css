@@ -21,6 +21,13 @@
   --gold-2: #d29a26;
   --green: #2ecc71;
   --red: #ef4444;
+  /* building pieces: green houses, red hotel, as on the physical board. One
+     pair of tokens so the board, the deed card, the build list, the trade
+     inventory and the roster counters can never drift apart. */
+  --house: #18a957;
+  --house-dark: #0e7a3c;
+  --hotel: #e1362c;
+  --hotel-dark: #a81e17;
   --radius: 10px;
   --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
@@ -226,7 +233,9 @@ body {
 
 .tile-top .tile__card { flex-direction: column-reverse; }
 .tile-top .tile__group { top: 0; bottom: auto; }
-.tile-top .tile__owner { top: auto; bottom: 0; }
+/* the top row is inverted, so the owner plate flips edge and grow direction
+   (its lit side flips too — see .tile-top.is-owned in the ownership section) */
+.tile-top .tile__owner { top: auto; bottom: 0; transform-origin: bottom center; }
 
 /* hover: group-color glow + lift toward the board center */
 .tile.is-active { box-shadow: inset 0 0 0 2px var(--gold); z-index: 2; }
@@ -241,16 +250,30 @@ body {
 .tile-left:hover { --lx: 2px; --ly: 0px; }
 .tile-right:hover { --lx: -2px; --ly: 0px; }
 
-/* ownership tint: soft player-color wash from the center-facing edge */
+/* ---------- ownership, layer 1: wash + ring ----------
+ * The wash falls from the center-facing edge and the ring outlines the whole
+ * plot, both in the owner's seat color. This is the layer you read without
+ * looking directly at the tile — it answers "taken or free?" at a glance,
+ * before you focus enough to read the plate or the rent. A completed country
+ * pushes the ring to full opacity and adds an inner glow. */
 .tile__tint {
   position: absolute;
   inset: 0;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 250ms ease;
-  background: linear-gradient(var(--tint-dir, 180deg), var(--oc-15, transparent), transparent 62%);
+  border-radius: inherit;
+  transition: opacity 260ms ease, box-shadow 260ms ease;
+  background: linear-gradient(var(--tint-dir, 180deg), var(--oc-24, transparent), transparent 68%);
 }
-.tile.is-owned .tile__tint { opacity: 1; }
+.tile.is-owned .tile__tint {
+  opacity: 1;
+  box-shadow: inset 0 0 0 2px var(--oc-55, transparent);
+}
+.tile.is-monopoly .tile__tint {
+  box-shadow:
+    inset 0 0 0 2px var(--oc, transparent),
+    inset 0 0 15px -3px var(--oc-55, transparent);
+}
 .tile-top { --tint-dir: 0deg; }
 
 .tile__banner {
@@ -337,6 +360,20 @@ body {
 
 .tile__price--tax { color: #ff8a8a; border-color: rgba(239, 68, 68, 0.35); }
 
+/* ---------- ownership, layer 3: live rent ----------
+ * On an owned plot the price is history, so the pill switches to what landing
+ * there costs now — houses, set bonus and airport ladder included. Kept on a
+ * dark ground with the number in the owner's color: a third solid color block
+ * next to the plate and the ring would be noise, and the digits have to stay
+ * readable at 12px. The "R" prefix is there so rent can never be misread as
+ * an asking price. */
+.tile__price--rent {
+  color: var(--oc, #f4f6fa);
+  border-color: var(--oc-55, rgba(255, 255, 255, 0.09));
+  background: rgba(6, 9, 14, 0.8);
+  font-weight: 800;
+}
+
 /* small country flag badge sitting next to the price tag */
 .tile__flagbadge {
   flex: 0 0 auto;
@@ -360,21 +397,68 @@ body {
   height: 4px;
 }
 
-/* ownership banner on the center-facing edge (inside the rotating card,
- * so it lands on the inner edge of every board side automatically) */
+/* ---------- ownership, layer 2: the owner plate ----------
+ * A solid seat-color band on the center-facing rim, carrying the owner's
+ * initial in ink chosen by luminance (ui.js inkOn) so it stays legible on
+ * amber and on violet alike. The initial is what makes the board unambiguous:
+ * two seats can sit close together on the color wheel, and colorblind players
+ * get nothing from the hue at all.
+ *
+ * It lives inside .tile__card, so it lands on the inner edge of all four board
+ * sides for free. It scales up from the rim on purchase rather than appearing,
+ * which is what makes a plot changing hands read as an event. */
 .tile__owner {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  height: 4px;
-  background: transparent;
+  height: 12%;
+  min-height: 11px;
+  display: flex;
+  align-items: center;
+  /* Content sits at one end of the band, not the middle: the 3D houses anchor
+     to the centre of the banner this plate overlaps, so a centred tag would be
+     buried under the buildings on exactly the tiles that matter most. */
+  justify-content: flex-end;
+  gap: 0.3em;
+  padding-inline: 0.5em;
+  overflow: hidden;
+  color: var(--oc-ink, #fff);
+  /* the cqw term keeps the tag proportional to the board; the rem cap stops it
+     outgrowing the plate on a very large board */
+  font-size: min(clamp(0.5rem, 0.72vw, 0.72rem), 1.15cqw);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-shadow: none;
+  transform: scaleY(0);
+  transform-origin: top center;
+  transition: transform 260ms cubic-bezier(0.34, 1.35, 0.64, 1), background-color 200ms ease;
   z-index: 3;
 }
 
-.tile__owner.is-owned {
-  box-shadow: 0 0 9px var(--oc-glow, rgba(0, 0, 0, 0.45));
+.tile.is-owned .tile__owner {
+  background-color: var(--oc);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(0, 0, 0, 0.18));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 2px 8px var(--oc-55, transparent);
+  transform: scaleY(1);
 }
+
+/* inverted top row: light the plate from below instead, so every plate on the
+   board looks lit from the same direction on screen. Must follow the rule
+   above — same specificity, so source order decides. */
+.tile-top.is-owned .tile__owner {
+  background-image: linear-gradient(0deg, rgba(255, 255, 255, 0.24), rgba(0, 0, 0, 0.18));
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.4), 0 -2px 8px var(--oc-55, transparent);
+}
+
+/* crown only once the whole country is theirs */
+.tile__crown { display: none; }
+.tile__crown .ic { width: 1.2em; height: 1.2em; }
+.tile.is-monopoly .tile__crown { display: inline-flex; }
+.tile.is-monopoly .tile__owner { height: 14%; }
+
+.tile__ownertag:empty { display: none; }
 
 .tile__sub {
   flex: 0 0 auto;
@@ -395,8 +479,15 @@ body {
   margin-bottom: 2px;
 }
 
-.ic-house { width: 10px; height: 10px; color: #fff; filter: drop-shadow(0 1px 2px rgba(0,0,0,.7)); }
-.ic-hotel { width: 14px; height: 14px; color: #60a5fa; filter: drop-shadow(0 1px 2px rgba(0,0,0,.7)); }
+/* 2D fallback pips, used only when WebGL is unavailable. Same green-house /
+   bigger-red-hotel reading as the 3D pieces. */
+.ic-house {
+  width: 11px;
+  height: 11px;
+  color: var(--house);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.75));
+}
+.ic-hotel { width: 15px; height: 15px; color: var(--hotel); }
 
 /* corner tints */
 .tile--corner-start { box-shadow: inset 0 0 0 1.5px rgba(46, 204, 113, 0.35); }
@@ -862,6 +953,8 @@ body {
 }
 
 .ic-pa { width: 10px; height: 10px; color: #6f7f94; }
+.pa--house .ic-pa { color: var(--house); }
+.pa--hotel .ic-pa { color: var(--hotel); width: 12px; height: 12px; }
 .pa--key { color: var(--green); }
 .pa--key .ic-pa { color: var(--green); }
 
@@ -1261,6 +1354,10 @@ body {
   gap: 3px;
 }
 .build-row__houses .ic-chip { color: var(--green); }
+.ic-chip--house { color: var(--house); }
+.ic-chip--hotel { color: var(--hotel); width: 12px; height: 12px; }
+.build-row__houses .ic-chip--house { color: var(--house); }
+.build-row__houses .ic-chip--hotel { color: var(--hotel); }
 
 .build-row__btn {
   width: 32px;
@@ -1616,6 +1713,8 @@ body {
 }
 
 .deed__cost b { color: #dfe5ee; font-weight: 700; }
+.ic-deed--house { color: var(--house); }
+.ic-deed--hotel { color: var(--hotel); width: 12px; height: 12px; }
 
 .deed__note {
   margin: 0;
@@ -1624,6 +1723,44 @@ body {
   line-height: 1.5;
   color: var(--muted);
 }
+
+/* what is built here, as pieces: filled slots are houses, outlined slots are
+   the room left to build, one red piece means a hotel */
+.deed__dev {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.022);
+}
+
+.deed__pieces { display: inline-flex; align-items: flex-end; gap: 3px; }
+
+.deed__pc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+
+.deed__pc .ic { width: 100%; height: 100%; }
+.deed__pc--house { color: var(--house); }
+.deed__pc--hotel { color: var(--hotel); width: 19px; height: 19px; }
+.deed__pc--empty {
+  width: 10px;
+  height: 10px;
+  margin-bottom: 1px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.deed__devtx { flex: 1 1 auto; }
+.deed__devrent { color: var(--gold); font-variant-numeric: tabular-nums; font-weight: 700; }
 
 .deed__live {
   display: flex;
@@ -2071,6 +2208,8 @@ body {
 }
 
 .inv-cell .ic-inv { width: 8px; height: 8px; color: var(--green); }
+.inv-cell .ic-inv--house { color: var(--house); }
+.inv-cell .ic-inv--hotel { color: var(--hotel); width: 11px; height: 11px; }
 .inv-cell.is-get { background: rgba(46, 204, 113, 0.18); border-color: rgba(46, 204, 113, 0.55); color: #d1fae5; }
 .inv-cell.is-give { background: rgba(239, 68, 68, 0.16); border-color: rgba(239, 68, 68, 0.5); color: #fee2e2; }
 .inv-cell.is-empty { color: var(--muted); font-style: italic; }

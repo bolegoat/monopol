@@ -50,10 +50,7 @@
     return g.ownsGroup(g.player(ps.owner), tile.country) ? "mono" : "base";
   }
 
-  const LEVEL_TEXT = {
-    base: "Base rent", mono: "Full country set",
-    h1: "1 house", h2: "2 houses", h3: "3 houses", hotel: "a hotel",
-  };
+
 
   /* ---------- deed card builders (emoji-free by design) ---------- */
 
@@ -80,11 +77,48 @@
     );
   }
 
-  function costRow(iconName, label, value) {
+  function costRow(iconName, label, value, iconCls) {
     return (
-      '<span class="deed__cost">' + icon(iconName) + label +
+      '<span class="deed__cost">' + icon(iconName, iconCls) + label +
       " <b>" + value + "</b></span>"
     );
+  }
+
+  /**
+   * What is actually built here, as pieces rather than a sentence.
+   *
+   * The card used to state "currently 2 houses" in prose at the very bottom,
+   * which meant hovering a developed property showed you no houses at all. Now
+   * it shows the pieces themselves: filled slots are green houses, the empty
+   * slots spell out how much room is left to build, and a hotel replaces the
+   * lot with one red piece. Current rent sits on the right, because that is
+   * the number the development is really telling you about.
+   */
+  function devStrip(g, tile) {
+    const ps = g && g.props[tile.id];
+    if (!ps || !ps.owner) return "";
+    const max = ECONOMY.maxHouses;
+    const built = ps.houses || 0;
+    const piece = (cls) => '<i class="deed__pc deed__pc--' + cls + '">' +
+      icon("houseSolid", "ic-pc") + "</i>";
+
+    let pieces, label;
+    if (built >= max) {
+      pieces = piece("hotel");
+      label = "Hotel built";
+    } else {
+      pieces = Array.from({ length: max },
+        (_, i) => (i < built ? piece("house") : '<i class="deed__pc deed__pc--empty"></i>')).join("");
+      label = built
+        ? built + (built > 1 ? " houses built" : " house built")
+        : "No houses built";
+    }
+
+    return '<div class="deed__dev">' +
+      '<span class="deed__pieces">' + pieces + "</span>" +
+      '<span class="deed__devtx">' + label + "</span>" +
+      '<b class="deed__devrent">' + euro(g.rentFor(tile)) + "</b>" +
+      "</div>";
   }
 
   function cityDeed(tile) {
@@ -107,19 +141,28 @@
       rentRow("With Hotel / Kafana", b * ECONOMY.houseMultipliers[4], "hotel", lv) +
       "</div>";
 
+    html += devStrip(g, tile);
+
     html += '<div class="deed__costs">' +
-      costRow("house", "House", euro(hc) + " each") +
-      costRow("building", "Hotel", euro(hc) + " + 4 houses") +
+      costRow("houseSolid", "House", euro(hc) + " each", "ic-deed ic-deed--house") +
+      costRow("houseSolid", "Hotel", euro(hc) + " + 4 houses", "ic-deed ic-deed--hotel") +
       costRow("banknote", "Mortgage", euro(Math.round(tile.price / 2))) +
       "</div>";
 
     if (g && lv) {
       const p = g.player(g.props[tile.id].owner);
+      // development is covered by the strip above, so the footer carries the
+      // other half of the story: who holds it, and whether they hold the set
+      const owned = COUNTRY_GROUPS[tile.country]
+        .filter((id) => g.props[id].owner === p.id).length;
+      const total = COUNTRY_GROUPS[tile.country].length;
       html +=
         '<div class="deed__live">' +
           '<span class="deed__token" style="background:' + p.color + '">' + face(p) + "</span>" +
-          "Owned by <strong>" + p.name + "</strong>" + DOT + " currently " +
-          LEVEL_TEXT[lv] +
+          "Owned by <strong>" + p.name + "</strong> " + DOT + " " +
+          (owned === total
+            ? "holds all of " + c.name
+            : owned + " of " + total + " " + c.short + " cities") +
         "</div>";
     }
     return html;
