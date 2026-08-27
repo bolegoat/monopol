@@ -1,7 +1,7 @@
 /* ============================================================================
  * Balkan Tycoon — board-data.js
- * The complete 40-tile ring: 8 countries, 4 airports, 2 utilities,
- * 4 Surprise, 3 Balkan Events, 1 border tax and 4 corner tiles.
+ * The complete 40-tile ring: 9 countries / 23 cities, 4 airports, 2 utilities,
+ * 3 Surprise, 3 Balkan Events, 1 border tax and 4 corner tiles.
  *
  * Layout: START sits in the TOP-LEFT corner and play runs CLOCKWISE —
  * top row left to right, down the right column, bottom row right to left,
@@ -11,21 +11,22 @@
  *   20 KAFANA (bottom-right)   30  GO TO JAIL (bottom-left)
  *
  * Country order = GDP per capita, poorest first, so the price ladder climbs
- * with real economic weight (see GDP_ORDER / TIER_PRICES below):
- *   top    XK + BA
- *   right  MK + AL
- *   bottom ME + RS
- *   left   HR + SI
+ * with real economic weight (see GDP_ORDER / CITY_PRICES below):
+ *   top    XK 2 + BA 3
+ *   right  MK 3 + AL 3
+ *   bottom ME 2 + RS 2 + BG 2
+ *   left   HR 4 + SI 2
  *
  * City distribution (CITY_DISTRIBUTION below is the single source of truth):
- *   North Macedonia 2 · Albania 3 · Slovenia 2 · everyone else 3
- * validateBoard() enforces those counts, the GDP price ladder, and a
- * minimum-spacing rule so cities never clump into long unbroken runs.
+ *   Kosovo 2 · Bosnia 3 · N. Macedonia 3 · Albania 3 · Montenegro 2 ·
+ *   Serbia 2 · Bulgaria 2 · Croatia 4 · Slovenia 2
+ * validateBoard() enforces those counts, the GDP price ladder, one airport per
+ * side, and a spacing rule so cities never clump into long unbroken runs.
  * ========================================================================== */
 
 "use strict";
 
-/* ---------- Countries (8 color groups, cheapest tier first) ----------
+/* ---------- Countries (9 color groups, cheapest tier first) ----------
  * gdpPerCapita: nominal USD, 2025 estimates. Seven come from the IMF World
  * Economic Outlook as tabulated by Worldometer; Kosovo (not in that table)
  * comes from Trading Economics. Figures are for ordering flavour, not
@@ -89,11 +90,20 @@ const COUNTRIES = {
     gdpPerCapita: 15284,
     flavor: "Where every deal comes with rakija.",
   },
+  bg: {
+    id: "bg",
+    name: "Bulgaria",
+    short: "BG",
+    color: "#17a398", // teal / tier 7
+    textOn: "#03231f",
+    gdpPerCapita: 17435,
+    flavor: "Rose oil, Black Sea sun, and paperwork in triplicate.",
+  },
   hr: {
     id: "hr",
     name: "Croatia",
     short: "HR",
-    color: "#1fb25a", // green / tier 7
+    color: "#1fb25a", // green / tier 8
     textOn: "#ffffff",
     gdpPerCapita: 27376,
     flavor: "Tourist season pays for everything.",
@@ -102,7 +112,7 @@ const COUNTRIES = {
     id: "si",
     name: "Slovenia",
     short: "SI",
-    color: "#2b4bd8", // dark blue / tier 8
+    color: "#2b4bd8", // dark blue / tier 9
     textOn: "#ffffff",
     gdpPerCapita: 37357,
     flavor: "Small country. Premium vibes. Premium invoices.",
@@ -110,35 +120,61 @@ const COUNTRIES = {
 };
 
 /* ---------- GDP price ladder ----------
- * GDP_ORDER is just the COUNTRIES keys, which are declared poorest-first, so
- * a country's tier is its index here. TIER_PRICES holds the three city prices
- * for each tier; a two-city country (MK, SI) takes the cheapest and dearest
- * slot of its tier and skips the middle one. validateBoard() checks the ring
- * against this table, so prices can never silently drift out of order. */
+ * GDP_ORDER is just the COUNTRIES keys, which are declared poorest-first, so a
+ * country's tier is its index here.
+ *
+ * CITY_PRICES lists every city price explicitly, cheapest first, one row per
+ * country. It used to be a fixed 3-wide matrix with a special case that let a
+ * 2-city country borrow the cheapest and dearest slot of its tier — which
+ * could not express Croatia's four cities at all. Spelling the rows out is
+ * both shorter and lets each group be any size.
+ *
+ * The ladder must rise monotonically across the whole ring: the last city of
+ * every tier is cheaper than the first city of the next. validateBoard()
+ * enforces that, plus row lengths against CITY_DISTRIBUTION, so a price can
+ * never silently drift out of order. */
 
 const GDP_ORDER = Object.keys(COUNTRIES);
 
-const TIER_PRICES = [
-  [60, 60, 80],     // 1 Kosovo
-  [100, 100, 120],  // 2 Bosnia & Herzegovina
-  [140, 140, 160],  // 3 North Macedonia   (2 cities -> 140 / 160)
-  [180, 180, 200],  // 4 Albania
-  [220, 220, 240],  // 5 Montenegro
-  [260, 260, 280],  // 6 Serbia
-  [300, 300, 320],  // 7 Croatia
-  [350, 350, 400],  // 8 Slovenia          (2 cities -> 350 / 400)
-];
+const CITY_PRICES = {
+  xk: [60, 80],                //  1 Kosovo
+  ba: [100, 100, 120],         //  2 Bosnia & Herzegovina
+  mk: [140, 140, 160],         //  3 North Macedonia
+  al: [180, 180, 200],         //  4 Albania
+  me: [220, 240],              //  5 Montenegro
+  rs: [260, 280],              //  6 Serbia
+  bg: [300, 320],              //  7 Bulgaria
+  hr: [340, 340, 360, 380],    //  8 Croatia — the long set
+  si: [420, 460],              //  9 Slovenia — the premium pair
+};
 
 /** The price the ladder expects for city #n (0-based) of a country. */
-function tierPrice(countryId, n, cityCount) {
-  const row = TIER_PRICES[GDP_ORDER.indexOf(countryId)];
-  if (!row) return null;
-  return cityCount === 2 ? (n === 0 ? row[0] : row[2]) : row[n];
+function tierPrice(countryId, n) {
+  const row = CITY_PRICES[countryId];
+  return row && n < row.length ? row[n] : null;
 }
+
+/* ---------- Flags ----------
+ * Every country has a hand-drawn inline SVG below, and most also have a real
+ * photo-quality PNG in public/flags. FLAG_PNGS lists which PNGs actually exist
+ * so flagBg() can skip the image layer for the rest — otherwise the browser
+ * requests a file that is not there and every one of that country's tiles logs
+ * a failed request. Add a filename here when you drop a new PNG in.
+ *
+ * Kosovo is deliberately absent: the shipped xk.png was a crude placeholder,
+ * so the inline SVG (six stars in an arc over the gold map) is the better of
+ * the two and is used on its own. */
+
+const FLAG_PNGS = new Set(["al", "ba", "bg", "hr", "me", "mk", "rs", "si"]);
 
 /* ---------- Compact inline SVG flags (viewBox 0 0 24 16) ---------- */
 
 const FLAGS = {
+  bg: `<svg viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <rect width="24" height="16" fill="#ffffff"/>
+    <rect y="5.33" width="24" height="5.34" fill="#00966e"/>
+    <rect y="10.67" width="24" height="5.33" fill="#d62612"/>
+  </svg>`,
   mk: `<svg viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <rect width="24" height="16" fill="#d20000"/>
     <g fill="#ffe600">
@@ -164,14 +200,14 @@ const FLAGS = {
   </svg>`,
   xk: `<svg viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <rect width="24" height="16" fill="#244aa5"/>
-    <path fill="#d0a650" d="M9 6.4l1.9-1.1 2.2.5 1.7 1.3.9 1.9-.7 1.6-1.6 1.5-2.3.5-1.9-.9-1.1-1.7.2-2z"/>
-    <g fill="#fff">
-      <path d="M7.1 3.2l.35.75.8.1-.6.55.15.8-.7-.4-.7.4.15-.8-.6-.55.8-.1z"/>
-      <path d="M9.6 2.2l.35.75.8.1-.6.55.15.8-.7-.4-.7.4.15-.8-.6-.55.8-.1z"/>
-      <path d="M12 1.9l.35.75.8.1-.6.55.15.8-.7-.4-.7.4.15-.8-.6-.55.8-.1z"/>
-      <path d="M14.4 2.2l.35.75.8.1-.6.55.15.8-.7-.4-.7.4.15-.8-.6-.55.8-.1z"/>
-      <path d="M16.9 3.2l.35.75.8.1-.6.55.15.8-.7-.4-.7.4.15-.8-.6-.55.8-.1z"/>
-      <path d="M12 13.1l.35.75.8.1-.6.55.15.8-.7-.4-.7.4.15-.8-.6-.55.8-.1z"/>
+    <path fill="#d0a650" d="M8.35 7.2q1.15-1.5 2.6-1.35 1.2.12 2.05-.35.95-.5 1.85.1.85.55 1.05 1.6.25 1.25-.5 2.2-.6.8-.55 1.55.05.9-.85 1.15-1.1.3-2.1-.35-.75-.5-1.65-.6-1.2-.15-1.75-1.15-.6-1.1-.2-2.8z"/>
+    <g fill="#fff" stroke="none">
+      <path transform="translate(5.5 4.15)" d="M0-1.25 .294-.405 1.189-.386 .476 .155 .735 1.011 0 .5 -.735 1.011 -.476 .155 -1.189-.386 -.294-.405Z"/>
+      <path transform="translate(8.1 3.1)" d="M0-1.25 .294-.405 1.189-.386 .476 .155 .735 1.011 0 .5 -.735 1.011 -.476 .155 -1.189-.386 -.294-.405Z"/>
+      <path transform="translate(10.7 2.6)" d="M0-1.25 .294-.405 1.189-.386 .476 .155 .735 1.011 0 .5 -.735 1.011 -.476 .155 -1.189-.386 -.294-.405Z"/>
+      <path transform="translate(13.3 2.6)" d="M0-1.25 .294-.405 1.189-.386 .476 .155 .735 1.011 0 .5 -.735 1.011 -.476 .155 -1.189-.386 -.294-.405Z"/>
+      <path transform="translate(15.9 3.1)" d="M0-1.25 .294-.405 1.189-.386 .476 .155 .735 1.011 0 .5 -.735 1.011 -.476 .155 -1.189-.386 -.294-.405Z"/>
+      <path transform="translate(18.5 4.15)" d="M0-1.25 .294-.405 1.189-.386 .476 .155 .735 1.011 0 .5 -.735 1.011 -.476 .155 -1.189-.386 -.294-.405Z"/>
     </g></svg>`,
   rs: `<svg viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <rect width="24" height="5.33" fill="#c6363c"/><rect y="5.33" width="24" height="5.34" fill="#0c4076"/><rect y="10.67" width="24" height="5.33" fill="#fff"/>
@@ -210,7 +246,13 @@ const city = (id, name, country, price) => ({
   baseRent: Math.round(price * ECONOMY.baseRentRate),
   houseCost: Math.round(price * ECONOMY.houseCostRate),
 });
-const airport = (id, name) => ({ id, kind: "airport", name, icon: "✈", price: 200 });
+/* `label` is the short form painted on the board tile; `name` stays the full
+ * official title for the deed card, the action log and trades. Only needed
+ * where the real name is too long to sit on a tile without wrapping to three
+ * or four lines. */
+const airport = (id, name, label) => ({
+  id, kind: "airport", name, label: label || name, icon: "✈", price: 200,
+});
 const utility = (id, name, icon) => ({ id, kind: "utility", name, icon, price: 150 });
 const surprise = (id) => ({ id, kind: "surprise", name: "Surprise", icon: "?" });
 const eventTile = (id) => ({ id, kind: "event", name: "Balkan Event", icon: "🎡" });
@@ -218,56 +260,69 @@ const eventTile = (id) => ({ id, kind: "event", name: "Balkan Event", icon: "�
 /* ---------- The 40-tile ring ----------
  * Index = board position. START is 0 (top-left corner) and play runs
  * clockwise: top row → right column → bottom row → left column.
- * Each side carries one airport, and prices climb with the GDP tiers. */
+ *
+ * Countries appear in GDP order, so the ring gets steadily more expensive the
+ * further you travel from START. Group sizes are deliberately uneven — the
+ * board opens with a cheap pair you can complete early, and the run-up to the
+ * priciest corner is Croatia's four-city set, which is the hardest thing on the
+ * board to finish and the most punishing once it is:
+ *
+ *   top     Kosovo 2      + Bosnia 3                (5 cities)
+ *   right   N. Macedonia 3 + Albania 3              (6)
+ *   bottom  Montenegro 2  + Serbia 2 + Bulgaria 2   (6)
+ *   left    Croatia 4     + Slovenia 2              (6)
+ *
+ * Each side carries exactly one airport, and no more than two cities ever sit
+ * side by side — validateBoard() enforces both, along with the price ladder. */
 
 const TILES = [
-  /* --- Top row, left to right: Start → Jail (Kosovo 3 + Bosnia 3) --- */
+  /* --- Top row, left to right: Start → Jail (Kosovo 2 + Bosnia 3) --- */
   { id: "start", kind: "corner", corner: "start", name: "START", icon: "🏁", sub: `Collect €${ECONOMY.goReward}` }, // 0
   city("prizren", "Prizren", "xk", 60), // 1
-  city("peja", "Peja", "xk", 60), // 2
+  city("prishtina", "Prishtina", "xk", 80), // 2
   surprise("surprise-1"), // 3
-  city("prishtina", "Prishtina", "xk", 80), // 4
-  eventTile("event-1"), // 5
-  city("mostar", "Mostar", "ba", 100), // 6
-  city("banja-luka", "Banja Luka", "ba", 100), // 7
-  airport("sarajevo-airport", "Sarajevo Airport"), // 8
-  city("sarajevo", "Sarajevo", "ba", 120), // 9
+  eventTile("event-1"), // 4
+  city("mostar", "Mostar", "ba", 100), // 5
+  city("banja-luka", "Banja Luka", "ba", 100), // 6
+  airport("sarajevo-airport", "Sarajevo Airport"), // 7
+  city("sarajevo", "Sarajevo", "ba", 120), // 8
+  surprise("surprise-2"), // 9
 
-  /* --- Right column, top to bottom: Jail → Kafana (N. Macedonia 2 + Albania 3) --- */
+  /* --- Right column, top to bottom: Jail → Kafana (N. Macedonia 3 + Albania 3) --- */
   { id: "jail", kind: "corner", corner: "jail", name: "JAIL", icon: "⛓", sub: "Just visiting" }, // 10
-  city("ohrid", "Ohrid", "mk", 140), // 11
-  utility("balkan-electric", "Balkan Electric", "⚡"), // 12
-  city("skopje", "Skopje", "mk", 160), // 13
-  airport("skopje-airport", "Skopje Airport"), // 14
+  city("bitola", "Bitola", "mk", 140), // 11
+  city("ohrid", "Ohrid", "mk", 140), // 12
+  utility("balkan-electric", "Balkan Electric", "⚡"), // 13
+  city("skopje", "Skopje", "mk", 160), // 14
   city("shkoder", "Shkodër", "al", 180), // 15
-  surprise("surprise-2"), // 16
+  airport("skopje-airport", "Skopje Airport"), // 16
   city("durres", "Durrës", "al", 180), // 17
-  eventTile("event-2"), // 18
-  city("tirana", "Tirana", "al", 200), // 19
+  city("tirana", "Tirana", "al", 200), // 18
+  eventTile("event-2"), // 19
 
-  /* --- Bottom row, right to left: Kafana → Go to Jail (Montenegro 3 + Serbia 3) --- */
+  /* --- Bottom row, right to left: Kafana → Go to Jail (Montenegro 2 + Serbia 2 + Bulgaria 2) --- */
   { id: "kafana", kind: "corner", corner: "kafana", name: "KAFANA", icon: "☕", sub: "Free parking" }, // 20
-  city("niksic", "Nikšić", "me", 220), // 21
-  city("budva", "Budva", "me", 220), // 22
-  surprise("surprise-3"), // 23
-  city("podgorica", "Podgorica", "me", 240), // 24
-  airport("belgrade-airport", "Belgrade Nikola Tesla Airport"), // 25
-  city("nis", "Niš", "rs", 260), // 26
-  city("novi-sad", "Novi Sad", "rs", 260), // 27
-  utility("rakija-distillery", "Rakija Distillery", "🥃"), // 28
-  city("belgrade", "Belgrade", "rs", 280), // 29
+  city("budva", "Budva", "me", 220), // 21
+  city("podgorica", "Podgorica", "me", 240), // 22
+  airport("belgrade-airport", "Belgrade Nikola Tesla Airport", "Belgrade Airport"), // 23
+  city("novi-sad", "Novi Sad", "rs", 260), // 24
+  city("belgrade", "Belgrade", "rs", 280), // 25
+  utility("rakija-distillery", "Rakija Distillery", "🥃"), // 26
+  city("plovdiv", "Plovdiv", "bg", 300), // 27
+  city("sofia", "Sofia", "bg", 320), // 28
+  surprise("surprise-3"), // 29
 
-  /* --- Left column, bottom to top: Go to Jail → Start (Croatia 3 + Slovenia 2) --- */
+  /* --- Left column, bottom to top: Go to Jail → Start (Croatia 4 + Slovenia 2) --- */
   { id: "go-to-jail", kind: "corner", corner: "go-to-jail", name: "GO TO JAIL", icon: "🚨", sub: "Bribe failed" }, // 30
-  city("osijek", "Osijek", "hr", 300), // 31
-  eventTile("event-3"), // 32
-  city("split", "Split", "hr", 300), // 33
-  surprise("surprise-4"), // 34
-  city("zagreb", "Zagreb", "hr", 320), // 35
-  airport("zagreb-airport", "Zagreb Franjo Tuđman Airport"), // 36
-  city("maribor", "Maribor", "si", 350), // 37
+  city("osijek", "Osijek", "hr", 340), // 31
+  city("rijeka", "Rijeka", "hr", 340), // 32
+  eventTile("event-3"), // 33
+  city("split", "Split", "hr", 360), // 34
+  city("zagreb", "Zagreb", "hr", 380), // 35
+  airport("zagreb-airport", "Zagreb Franjo Tuđman Airport", "Zagreb Airport"), // 36
+  city("maribor", "Maribor", "si", 420), // 37
   { id: "border-crossing", kind: "tax", name: "Border Crossing", icon: "🛃", amount: 100 }, // 38
-  city("ljubljana", "Ljubljana", "si", 400), // 39
+  city("ljubljana", "Ljubljana", "si", 460), // 39
 ];
 
 /* ---------- Board geometry helpers (11x11 CSS grid) ---------- */
@@ -361,19 +416,20 @@ const COUNTRY_GROUPS = Object.fromEntries(
 );
 
 /* ---------- Board balance spec + self-check ----------
- * CITY_DISTRIBUTION is the contract the ring above must satisfy. Two cheap
- * cities keep North Macedonia and Slovenia as short (and therefore cheaper
- * to complete) sets at the two ends of the price curve; everyone else runs
- * the standard three.
+ * CITY_DISTRIBUTION is the contract the ring above must satisfy: 23 cities
+ * across 9 countries, sized so the board has a shape rather than a uniform
+ * grind. Kosovo opens with a cheap pair that can be completed on the first
+ * lap, the mid-board runs full three-city sets, the bottom row is three quick
+ * pairs, and Croatia's four-city set guards the approach to Slovenia's
+ * premium pair.
  *
- * MIN_CITY_GAP is the spacing rule: with 22 cities on a 40-tile ring you can
- * never separate every city (that would need 22 gaps and only 18 non-city
- * tiles exist), so "not too close" is enforced as a maximum unbroken run —
- * no more than MAX_CITY_RUN cities in a row, i.e. every pair of cities is at
- * most MAX_CITY_RUN deep before an airport / utility / card / corner breaks
- * the chain. */
+ * The spacing rule: with 23 cities on a 40-tile ring you can never separate
+ * every city (that would need 23 gaps and only 17 non-city tiles exist), so
+ * "not too close" is enforced as a maximum unbroken run — no more than
+ * MAX_CITY_RUN cities in a row, i.e. an airport / utility / card / corner
+ * always breaks the chain within two tiles. */
 
-const CITY_DISTRIBUTION = { mk: 2, al: 3, si: 2, hr: 3, ba: 3, rs: 3, me: 3, xk: 3 };
+const CITY_DISTRIBUTION = { xk: 2, ba: 3, mk: 3, al: 3, me: 2, rs: 2, bg: 2, hr: 4, si: 2 };
 const MAX_CITY_RUN = 2;
 
 /**
@@ -400,6 +456,7 @@ function validateBoard() {
 
   // GDP ladder: tiers must be declared poorest-first and prices must match
   let prevGdp = -Infinity;
+  let prevTierTop = null;
   for (const cid of GDP_ORDER) {
     const gdp = COUNTRIES[cid].gdpPerCapita;
     if (!(gdp > prevGdp)) {
@@ -409,11 +466,29 @@ function validateBoard() {
 
     const cities = TILES.filter((t) => t.kind === "city" && t.country === cid);
     cities.forEach((t, n) => {
-      const want = tierPrice(cid, n, cities.length);
+      const want = tierPrice(cid, n);
       if (t.price !== want) {
         errors.push(`${t.id}: price ${t.price}, tier ${GDP_ORDER.indexOf(cid) + 1} expects ${want}`);
       }
     });
+
+    // every price row must be as long as the group it prices, and the ladder
+    // must keep climbing across the tier boundary
+    const row = CITY_PRICES[cid];
+    if (!row) {
+      errors.push(`${cid}: no CITY_PRICES row`);
+    } else {
+      if (row.length !== CITY_DISTRIBUTION[cid]) {
+        errors.push(`${cid}: ${row.length} prices for ${CITY_DISTRIBUTION[cid]} cities`);
+      }
+      for (let i = 1; i < row.length; i++) {
+        if (row[i] < row[i - 1]) errors.push(`${cid}: prices fall at index ${i} (${row[i - 1]} -> ${row[i]})`);
+      }
+      if (prevTierTop !== null && row[0] <= prevTierTop) {
+        errors.push(`${cid}: opens at ${row[0]}, not above the previous tier's ${prevTierTop}`);
+      }
+      prevTierTop = row[row.length - 1];
+    }
   }
 
   for (const [cid, want] of Object.entries(CITY_DISTRIBUTION)) {
@@ -447,15 +522,27 @@ function validateBoard() {
     errors.push(`${worst} cities in a row (ending at tile ${worstAt}) — max ${MAX_CITY_RUN}`);
   }
 
+  // one airport per side, so no edge of the board is a transport dead zone
+  const airportsBySide = {};
+  TILES.forEach((t, i) => {
+    if (t.kind !== "airport") return;
+    const side = tileSide(i);
+    airportsBySide[side] = (airportsBySide[side] || 0) + 1;
+  });
+  for (const side of ["top", "right", "bottom", "left"]) {
+    const n = airportsBySide[side] || 0;
+    if (n !== 1) errors.push(`${side} side has ${n} airports, expected 1`);
+  }
+
   return { ok: errors.length === 0, errors, counts };
 }
 
 /* Expose to the other classic scripts / console debugging. */
 window.BT = Object.assign(window.BT || {}, {
-  COUNTRIES, FLAGS, ECONOMY, TILES, GRID_SIZE,
+  COUNTRIES, FLAGS, FLAG_PNGS, ECONOMY, TILES, GRID_SIZE,
   gridPos, tileSide, tileById, tileIndex, COUNTRY_GROUPS,
   cornerAnchor, inwardVec, JAIL_GEO,
-  CITY_DISTRIBUTION, GDP_ORDER, TIER_PRICES, tierPrice, validateBoard,
+  CITY_DISTRIBUTION, GDP_ORDER, CITY_PRICES, tierPrice, validateBoard,
 });
 
 /* Fail loud in the console (never fatal) if the ring drifts from the spec. */

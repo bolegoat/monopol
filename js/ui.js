@@ -138,7 +138,8 @@
         const ic = tile.kind === "airport" ? "plane" : tile.id === "balkan-electric" ? "zap" : "bottle";
         return (
           '<div class="tile__figure" data-banner>' + icon(ic) + "</div>" +
-          '<div class="tile__body"><span class="tile__name">' + tile.name + "</span></div>" +
+          // short board label where one exists; the full name lives on the deed
+          '<div class="tile__body"><span class="tile__name">' + esc(tile.label || tile.name) + "</span></div>" +
           '<div class="tile__footer">' + price + "</div>" +
           '<div class="tile__group" style="background:' + kindColor(tile) + '"></div>');
       }

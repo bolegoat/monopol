@@ -73,7 +73,7 @@
     },
     {
       key: "cornerUpLeft", tint: "#ffb264", title: "Wrong Turn",
-      text: "The GPS gave up somewhere near Niš. Move back 3 spaces.",
+      text: "The GPS gave up somewhere near Bitola. Move back 3 spaces.",
       async apply(game, p) { await game._movePawn(p, -3, false); await game._resolveLanding(p, 1); },
     },
     {

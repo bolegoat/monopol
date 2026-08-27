@@ -12,9 +12,15 @@
 "use strict";
 
 (function () {
-  const DIE_SIZE = 1.1;
-  const DIE_RADIUS = 0.14; // rounded corner radius
-  const CEILING = 7.2; // invisible ceiling of the bounding box
+  /* The camera sees roughly 6.7 world units across, so DIE_SIZE is directly a
+   * fraction of the board centre: at 1.1 each die filled ~18% of it, which read
+   * as two giant cubes parked on the logo rather than dice on a board. 0.62
+   * puts them near 9%, about the proportion of a real die to a real board.
+   * DIE_RADIUS is kept at the same ~13% of the edge so the corners stay as
+   * softly rounded as before instead of turning the cube into a pebble. */
+  const DIE_SIZE = 0.62;
+  const DIE_RADIUS = DIE_SIZE * 0.127; // rounded corner radius
+  const CEILING = 5; // invisible ceiling of the bounding box
   const SETTLE_SPEED = 0.12;
   const SETTLE_FRAMES = 8;
   const MAX_ROLL_MS = 2600; // fail-safe: force stabilization & fire callback

@@ -10,9 +10,24 @@
 "use strict";
 
 (function () {
-  const STEP_MS = 240;          // per-tile cadence (200ms hop + glide settle)
+  const STEP_MS = 240;          // per-tile cadence for an ordinary dice move
   const ARRIVAL_PAUSE_MS = 400; // pause on destination before modals
   const HOP_CLASS = "hop";
+
+  /* Long moves get a faster cadence instead of a longer wait.
+   * A dice roll is 2-12 tiles, but a card can send a pawn most of the way
+   * around the ring: "advance to Ljubljana" from tile 3 is 36 hops, which at
+   * the full cadence is a nine-second crawl with the whole game frozen behind
+   * it. So the trip is budgeted rather than priced per tile — anything up to
+   * seven hops keeps the original feel, and longer journeys speed up to land
+   * inside the budget, down to a floor that keeps each hop visible. */
+  const TRAVEL_BUDGET_MS = 1800;
+  const MIN_STEP_MS = 46;
+
+  const stepCadence = (steps) => {
+    const n = Math.abs(steps) || 1;
+    return Math.max(MIN_STEP_MS, Math.min(STEP_MS, Math.round(TRAVEL_BUDGET_MS / n)));
+  };
 
   const wait = (ms) => new Promise((res) => setTimeout(res, ms));
 
@@ -198,7 +213,13 @@
       this._relayout();
     }
 
-    _replayHop(pawn) {
+    /**
+     * Restart the bounce. `ms` keeps the CSS animation inside the current
+     * cadence, so a sped-up long move reads as quick hops rather than a
+     * half-finished bounce being cut off on every tile.
+     */
+    _replayHop(pawn, ms) {
+      pawn.el.style.setProperty("--hop-ms", Math.max(90, Math.round(ms * 0.85)) + "ms");
       pawn.el.classList.remove(HOP_CLASS);
       void pawn.el.offsetWidth; // restart the CSS animation
       pawn.el.classList.add(HOP_CLASS);
@@ -218,6 +239,7 @@
 
       const dir = steps > 0 ? 1 : -1;
       const total = TILES.length;
+      const stepMs = stepCadence(steps);
       let pos = fromPos;
       // A backgrounded tab gets its timers clamped to 1/min — a host that
       // switches windows must never stall the whole match, so skip the
@@ -229,8 +251,8 @@
         pos = (((pos + dir) % total) + total) % total; // stepIndex++ one tile at a time
         pawn.pos = pos;
         this._relayout();          // glides via CSS transition…
-        if (animate) this._replayHop(pawn); // …while bouncing translateY(-16px) scale(1.1)
-        if (animate) await wait(STEP_MS);
+        if (animate) this._replayHop(pawn, stepMs); // …while bouncing translateY(-16px) scale(1.1)
+        if (animate) await wait(stepMs);
         if (dir > 0 && pos === 0 && hooks.onPassGo) hooks.onPassGo();
       }
       pawn.el.style.zIndex = "";

@@ -518,13 +518,19 @@ body {
   overflow: hidden;
 }
 
+/* Pinned to the upper third rather than flex-centred: the dice settle around
+   the middle of the centre panel, and a dead-centre logo just becomes something
+   for them to land on top of. */
 .board-logo {
+  position: absolute;
+  top: 11%;
+  left: 50%;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.4cqw;
-  transform: rotate(-6deg);
-  opacity: 0.9;
+  transform: translateX(-50%) rotate(-6deg);
+  opacity: 0.78;
   pointer-events: none;
 }
 
@@ -606,7 +612,9 @@ body {
   100% { transform: translate(-50%, -50%) translateY(0) scale(1); }
 }
 
-.pawn.hop { animation: pawn-hop 200ms ease-out; }
+/* duration is driven by movement.js so the bounce always fits the hop cadence,
+   which speeds up on long card moves */
+.pawn.hop { animation: pawn-hop var(--hop-ms, 200ms) ease-out; }
 
 .meeple {
   display: inline-flex;

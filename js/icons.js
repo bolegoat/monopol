@@ -109,14 +109,22 @@
     return icon("help", cls);
   }
 
-  /* Flag backgrounds: real PNG first (public/flags/{id}.png — drop your
-   * files there), inline-SVG fallback underneath so it always renders.
+  /* Flag backgrounds: real PNG first (public/flags/{id}.png), inline-SVG
+   * underneath so it always renders. The PNG layer is only added for countries
+   * listed in BT.FLAG_PNGS, so a country that ships SVG-only never fires a
+   * request for a file that does not exist.
    * NOTE: single quotes inside url() — this string is embedded in a
    * double-quoted style="" attribute. */
   function flagBg(cid) {
-    const svg = encodeURIComponent((window.BT && window.BT.FLAGS && window.BT.FLAGS[cid]) || "");
-    return "background-image:url('public/flags/" + cid + ".png'),url('data:image/svg+xml," + svg +
-      "');background-size:cover,cover;background-position:center,center;";
+    const BT = window.BT || {};
+    const svg = encodeURIComponent((BT.FLAGS && BT.FLAGS[cid]) || "");
+    const layers = [];
+    if (BT.FLAG_PNGS && BT.FLAG_PNGS.has(cid)) layers.push("url('public/flags/" + cid + ".png')");
+    layers.push("url('data:image/svg+xml," + svg + "')");
+    const size = layers.map(() => "cover").join(",");
+    const pos = layers.map(() => "center").join(",");
+    return "background-image:" + layers.join(",") +
+      ";background-size:" + size + ";background-position:" + pos + ";";
   }
 
   window.BT = Object.assign(window.BT || {}, { icon, anyIcon, EMOJI_ICONS, flagBg, ICONS });
