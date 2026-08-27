@@ -18,6 +18,25 @@
 
   /* Cluster layouts (fraction of tile size, relative to tile centre).
    * Chosen per number of pawns currently occupying the tile. */
+  /* Prison zones, keyed by board index: where a locked-up pawn stands (inside
+   * the cell) versus a pawn that is only visiting (out in the yard). Derived
+   * from BT.JAIL_GEO so the pawns land exactly inside the CSS cell. */
+  const JAIL_ZONES = (() => {
+    const { TILES, cornerAnchor, inwardVec, JAIL_GEO } = window.BT;
+    const out = {};
+    TILES.forEach((tile, index) => {
+      if (tile.kind !== "corner" || tile.corner !== "jail") return;
+      const v = inwardVec(cornerAnchor(index));
+      out[index] = {
+        cell: { x: v.x * JAIL_GEO.CELL_OFFSET, y: v.y * JAIL_GEO.CELL_OFFSET },
+        cellSpread: JAIL_GEO.CELL_SPREAD,
+        // slots are authored in "outward" space, so flip them per corner
+        yardSlots: JAIL_GEO.YARD_SLOTS.map(([ox, oy]) => [-v.x * ox, -v.y * oy]),
+      };
+    });
+    return out;
+  })();
+
   const CLUSTER_LAYOUTS = {
     1: [[0, 0]],
     2: [[-0.21, 0], [0.21, 0]],
@@ -50,8 +69,11 @@
         : window.BT.Tokens.hashStyle(player.name);
       el.innerHTML = window.BT.Tokens.face(style); // procedural SVG token face
       el.title = player.name;
+      el.classList.toggle("is-jailed", Boolean(player.inJail));
       this.layer.appendChild(el);
-      this.pawns.set(player.id, { el, seat, pos: player.position });
+      this.pawns.set(player.id, {
+        el, seat, pos: player.position, jailed: Boolean(player.inJail),
+      });
       this._relayout();
     }
 
@@ -62,9 +84,48 @@
       this._relayout();
     }
 
+    /**
+     * Lock a pawn up or let it out. Jailed pawns move inside the cell (behind
+     * the bars); everyone else standing on the tile waits in the yard, so
+     * "doing time" and "just passing through" never look the same.
+     */
     setJailed(playerId, jailed) {
       const p = this.pawns.get(playerId);
-      if (p) p.el.classList.toggle("is-jailed", jailed);
+      if (!p) return;
+      p.jailed = Boolean(jailed);
+      p.el.classList.toggle("is-jailed", p.jailed);
+      this._relayout();
+    }
+
+    /**
+     * Online presence on the board: a dropped player greys out and gets a
+     * warning pip; coming back brightens the pawn with a short pulse.
+     * @param {string} playerId
+     * @param {boolean} connected
+     */
+    setPresence(playerId, connected) {
+      const p = this.pawns.get(playerId);
+      if (!p) return;
+      const wasOffline = p.el.classList.contains("is-offline");
+      if (wasOffline === !connected) return; // nothing changed
+      p.el.classList.toggle("is-offline", !connected);
+
+      const existing = p.el.querySelector(".pawn__warn");
+      if (!connected) {
+        if (!existing) {
+          const warn = document.createElement("span");
+          warn.className = "pawn__warn";
+          warn.title = "Disconnected";
+          warn.innerHTML = window.BT.icon("alert");
+          p.el.appendChild(warn);
+        }
+      } else {
+        if (existing) existing.remove();
+        p.el.classList.remove("just-online");
+        void p.el.offsetWidth; // restart the reconnect pulse
+        p.el.classList.add("just-online");
+        setTimeout(() => p.el.classList.remove("just-online"), 950);
+      }
     }
 
     /* ---------- dynamic 2x2 cluster stacking ---------- */
@@ -76,20 +137,44 @@
         .sort((a, b) => a[1].seat - b[1].seat);
     }
 
+    /** Lay a group of pawns out around a point, shrunk to fit its zone. */
+    _placeGroup(entries, pos, center, spread) {
+      if (!entries.length) return;
+      const layout = CLUSTER_LAYOUTS[Math.min(entries.length, 6)];
+      entries.forEach(([id], i) => {
+        const [ox, oy] = layout[Math.min(i, layout.length - 1)];
+        this._apply(this.pawns.get(id), pos, center.x + ox * spread, center.y + oy * spread);
+      });
+    }
+
     /** Recompute every pawn's anchor (called after any position change). */
     _relayout() {
-      const byTile = new Map();
-      for (const [id, p] of this.pawns) {
-        if (!byTile.has(p.pos)) byTile.set(p.pos, []);
-        byTile.get(p.pos).push(id);
-      }
-      for (const [pos] of byTile) {
+      const occupied = new Set();
+      for (const [, p] of this.pawns) occupied.add(p.pos);
+
+      for (const pos of occupied) {
         const occupants = this._occupants(pos);
+        const zones = JAIL_ZONES[pos];
+
+        if (zones) {
+          // the prison splits in two: locked in the cell, or out in the yard
+          const jailed = occupants.filter(([, p]) => p.jailed);
+          const visiting = occupants.filter(([, p]) => !p.jailed);
+          this._placeGroup(jailed, pos, zones.cell, zones.cellSpread);
+          visiting.forEach(([id], i) => {
+            const [fx, fy] = zones.yardSlots[Math.min(i, zones.yardSlots.length - 1)];
+            this._apply(this.pawns.get(id), pos, fx, fy);
+          });
+          // slimmer tokens so both zones stay uncluttered on a corner tile
+          for (const [id] of occupants) this.pawns.get(id).el.classList.add("pawn--jail");
+          continue;
+        }
+        for (const [id] of occupants) this.pawns.get(id).el.classList.remove("pawn--jail");
+
         const layout = CLUSTER_LAYOUTS[Math.min(occupants.length, 6)];
         occupants.forEach(([id], i) => {
-          const pawn = this.pawns.get(id);
           const [fx, fy] = layout[i];
-          this._apply(pawn, pos, fx, fy);
+          this._apply(this.pawns.get(id), pos, fx, fy);
         });
       }
     }

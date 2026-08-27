@@ -27,6 +27,10 @@
       : tile.kind === "airport" ? "#4f7d99"
       : "#8f8a3f";
 
+  /** HTML-escape any player/tile supplied string before it hits innerHTML. */
+  const esc = (s) =>
+    String(s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+
   /** hex (#rgb/#rrggbb) -> rgba() string with alpha `a`. */
   function hexA(hex, a) {
     let h = String(hex).replace("#", "");
@@ -36,6 +40,26 @@
   }
 
   /* ================= Board rendering ================= */
+
+  /* The prison is the one corner with real internals: a barred cell leaning
+   * toward the board centre, and an exercise yard on the outer edge. Pawns
+   * doing time stand inside the cell (movement.js puts them there and the
+   * front bar layer draws over them); anyone merely passing through waits in
+   * the yard, so the two states never look alike. */
+  function jailInnerHTML(tile) {
+    return (
+      '<div class="jail">' +
+        '<div class="jail__yard">' +
+          '<span class="jail__tag">' + icon("eye", "ic-jail") + "Just visiting</span>" +
+        "</div>" +
+        '<div class="jail__cell jail-box">' +
+          '<div class="jail__floor" aria-hidden="true"></div>' +
+          '<div class="jail__window" aria-hidden="true"></div>' +
+          '<div class="jail__plaque">' + icon("lock", "ic-jail") + "<b>" + esc(tile.name) + "</b></div>" +
+        "</div>" +
+      "</div>"
+    );
+  }
 
   function tileInnerHTML(tile) {
     const price = '<span class="tile__price">&euro;' + tile.price + "</span>";
@@ -76,7 +100,8 @@
           '<div class="tile__body"><span class="tile__name">' + tile.name + "</span></div>" +
           '<div class="tile__footer"><span class="tile__price tile__price--tax">&euro;' + tile.amount + "</span></div>");
       case "corner": {
-        const ic = { start: "flag", jail: "bars", kafana: "coffee", "go-to-jail": "alert" }[tile.corner];
+        if (tile.corner === "jail") return jailInnerHTML(tile);
+        const ic = { start: "flag", kafana: "coffee", "go-to-jail": "alert" }[tile.corner];
         return (
           '<div class="tile__figure">' + icon(ic) + "</div>" +
           '<div class="tile__body"><span class="tile__name">' + tile.name + "</span></div>" +
@@ -86,6 +111,32 @@
         return "";
     }
   }
+  /**
+   * The front half of the cell bars, as its own grid item stacked on the jail
+   * tile. It has to live outside the tile so it can paint ABOVE the pawn layer
+   * — that is what puts the prisoners behind bars instead of in front of them.
+   * Cell geometry comes from BT.JAIL_GEO via CSS custom properties, the same
+   * numbers movement.js uses to seat the pawns.
+   */
+  function renderJailBars(board) {
+    const geo = window.BT.JAIL_GEO;
+    board.style.setProperty("--jail-inset", geo.CELL_INSET * 100 + "%");
+    board.style.setProperty("--jail-size", geo.CELL_SIZE * 100 + "%");
+
+    board.querySelectorAll(".jail-front").forEach((el) => el.remove());
+    const index = TILES.findIndex((t) => t.kind === "corner" && t.corner === "jail");
+    if (index < 0) return;
+
+    const pos = gridPos(index);
+    const front = document.createElement("div");
+    front.className = "jail-front tile--at-" + window.BT.cornerAnchor(index);
+    front.setAttribute("aria-hidden", "true");
+    front.style.gridRow = String(pos.row);
+    front.style.gridColumn = String(pos.col);
+    front.innerHTML = '<div class="jail-box jail-front__cell"><i class="jail__bars"></i></div>';
+    board.appendChild(front);
+  }
+
   UI.renderBoard = function () {
     const board = $("#board");
     UI.tileEls = [];
@@ -95,7 +146,10 @@
       const pos = gridPos(index);
       const el = document.createElement("div");
       el.className = "tile tile--" + tile.kind + " tile-" + tileSide(index);
-      if (tile.kind === "corner") el.classList.add("tile--corner-" + tile.corner);
+      if (tile.kind === "corner") {
+        // tile--at-{tl,tr,br,bl} tells corner internals which way is "inward"
+        el.classList.add("tile--corner-" + tile.corner, "tile--at-" + window.BT.cornerAnchor(index));
+      }
       el.style.gridRow = String(pos.row);
       el.style.gridColumn = String(pos.col);
       el.dataset.pos = String(index);
@@ -122,6 +176,7 @@
       });
     });
 
+    renderJailBars(board);
     UI.measureCells();
     if (!UI._cellRO && window.ResizeObserver) {
       UI._cellRO = new ResizeObserver(() => UI.measureCells());
@@ -164,7 +219,10 @@
       parts.ownerBar.style.background = owner ? owner.color : "transparent";
       parts.ownerBar.classList.toggle("is-owned", Boolean(owner));
       if (parts.housesBox && tile.kind === "city") {
-        const n = ps.houses;
+        // The 3D overlay owns the buildings when WebGL is up; the flat pips are
+        // only a fallback so a no-WebGL browser still shows development level.
+        const flat = !(window.BT.Buildings && window.BT.Buildings.active());
+        const n = flat ? ps.houses : 0;
         parts.housesBox.innerHTML = n >= 4
           ? icon("building", "ic-house ic-hotel")
           : Array.from({ length: n }, () => icon("house", "ic-house")).join("");
@@ -174,43 +232,257 @@
     if (window.BT.Buildings) window.BT.Buildings.sync(game);
   };
 
-  /* ================= Side panel ================= */
+  /* ================= Side panel: player fields ================= */
+
+  /* Online presence: playerId -> false when that seat has dropped. Empty in
+   * local hot-seat, where everybody is by definition at the table. */
+  UI.presence = new Map();
+
+  /* ---------------------------------------------------------------------------
+   * The roster reads like a ledger: one dense line per player, seat colour as
+   * a rule down the left, money right-aligned in tabular figures so the digits
+   * stack. Rows are built once and then patched in place — that is what lets
+   * the cash roll and the +/- deltas float instead of the whole list flashing.
+   * ------------------------------------------------------------------------ */
+
+  const money = (n) => "\u20ac" + Math.round(n).toLocaleString("en-US");
+
+  /** Tally holdings + monopoly progress per country group. */
+  function holdings(game, p) {
+    const out = { airports: 0, utilities: 0, houses: 0, hotels: 0, sets: [] };
+    const byCountry = new Map();
+    for (const t of game.ownedTiles(p)) {
+      if (t.kind === "city") {
+        byCountry.set(t.country, (byCountry.get(t.country) || 0) + 1);
+        const h = game.props[t.id].houses || 0;
+        if (h >= ECONOMY.maxHouses) out.hotels += 1;
+        else out.houses += h;
+      } else if (t.kind === "airport") out.airports += 1;
+      else if (t.kind === "utility") out.utilities += 1;
+    }
+    // keep the board's own cheap-to-premium order so the pips read left to right
+    for (const cid of Object.keys(COUNTRIES)) {
+      const owned = byCountry.get(cid);
+      if (!owned) continue;
+      out.sets.push({ cid, owned, total: COUNTRY_GROUPS[cid].length });
+    }
+    return out;
+  }
+
+  /* Segmented pips: how far along each colour set the player is. */
+  function setPips(sets) {
+    return sets.map(({ cid, owned, total }) => {
+      const c = COUNTRIES[cid];
+      const full = owned === total;
+      const cells = Array.from({ length: total },
+        (_, i) => '<i' + (i < owned ? ' class="on"' : "") + "></i>").join("");
+      return '<span class="setpip' + (full ? " is-full" : "") + '" style="--gc:' + c.color +
+        '" title="' + esc(c.name) + " " + owned + "/" + total + (full ? " — full set" : "") + '">' +
+        cells + "</span>";
+    }).join("");
+  }
+
+  /* Compact asset counters — only what the player actually has. */
+  const ASSETS = [
+    ["houses", "house"],
+    ["hotels", "star"],
+    ["airports", "plane"],
+    ["utilities", "zap"],
+  ];
+
+  function assetRow(h, p) {
+    const cells = ASSETS
+      .filter(([k]) => h[k] > 0)
+      .map(([k, ic]) => '<span class="pa">' + icon(ic, "ic-pa") + h[k] + "</span>");
+    if (p.getOutCards > 0) {
+      cells.push('<span class="pa pa--key" title="Get-Out-of-Jail">' + icon("key", "ic-pa") + p.getOutCards + "</span>");
+    }
+    return cells.join("");
+  }
+
+  /** Build the static skeleton of one ledger row. */
+  function makeRow(p) {
+    const li = document.createElement("li");
+    li.className = "pl";
+    li.dataset.playerId = p.id;
+    li.style.setProperty("--pc", p.color);
+    li.style.setProperty("--pc-14", hexA(p.color, 0.14));
+    li.style.setProperty("--pc-50", hexA(p.color, 0.5));
+    li.innerHTML =
+      '<div class="pl__worth"><i></i></div>' +
+      '<div class="pl__row">' +
+        badge(p.color, p.tokenStyle, "pl__tok") +
+        '<span class="pl__id">' +
+          '<span class="pl__name"></span>' +
+          '<span class="pl__flags"></span>' +
+        "</span>" +
+        '<span class="pl__delta"></span>' +
+        '<b class="pl__cash"></b>' +
+      "</div>" +
+      '<div class="pl__meta">' +
+        '<span class="pl__sets"></span>' +
+        '<span class="pl__assets"></span>' +
+      "</div>" +
+      '<div class="pl__clock"><i></i></div>';
+    return {
+      el: li,
+      name: li.querySelector(".pl__name"),
+      flags: li.querySelector(".pl__flags"),
+      cash: li.querySelector(".pl__cash"),
+      sets: li.querySelector(".pl__sets"),
+      assets: li.querySelector(".pl__assets"),
+      worth: li.querySelector(".pl__worth i"),
+      clock: li.querySelector(".pl__clock i"),
+      delta: li.querySelector(".pl__delta"),
+      shown: p.cash, // last painted cash value, for the roll animation
+    };
+  }
+
+  UI._rows = new Map();
+
+  /** Roll a cash figure from its current value to the new one. */
+  function rollCash(row, to) {
+    const from = row.shown;
+    row.shown = to;
+    if (from === to) { row.cash.textContent = money(to); return; }
+    if (Math.abs(to - from) < 2 || document.hidden) {
+      row.cash.textContent = money(to);
+      return;
+    }
+    cancelAnimationFrame(row.raf);
+    const t0 = performance.now();
+    const dur = 420;
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / dur);
+      const e = 1 - Math.pow(1 - k, 3);
+      row.cash.textContent = money(from + (to - from) * e);
+      if (k < 1) row.raf = requestAnimationFrame(step);
+    };
+    row.raf = requestAnimationFrame(step);
+  }
+
+  /** Float a +/- amount off the row. */
+  function showDelta(row, amount) {
+    const el = row.delta;
+    el.textContent = (amount > 0 ? "+" : "\u2212") + money(Math.abs(amount));
+    el.className = "pl__delta " + (amount > 0 ? "is-up" : "is-down");
+    void el.offsetWidth; // restart
+    el.classList.add("is-live");
+    clearTimeout(row.deltaTimer);
+    row.deltaTimer = setTimeout(() => el.classList.remove("is-live"), 1100);
+  }
 
   UI.renderPlayers = function (game) {
     const list = $("#player-list");
-    list.innerHTML = "";
-    for (const p of game.players) {
-      const li = document.createElement("li");
-      li.className = "player-card";
-      if (p.id === game.current.id && game.phase !== "over") li.classList.add("is-turn");
-      if (p.bankrupt) li.classList.add("is-bankrupt");
+    if (!list) return;
+    const myId = window.BT.myPlayerId;
 
-      const chips = game.ownedTiles(p).map((t) => {
-        const h = game.props[t.id].houses;
-        const houses = h >= 4
-          ? icon("building", "ic-chip")
-          : h > 0 ? Array.from({ length: h }, () => icon("house", "ic-chip")).join("") : "";
-        return '<span class="prop-chip"><i style="background:' + kindColor(t) + '"></i>' +
-          t.name + houses + "</span>";
-      }).join("");
-
-      const tag = p.bankrupt
-        ? '<span class="player-card__tag">Bankrupt</span>'
-        : p.inJail
-          ? '<span class="player-card__tag">In jail</span>'
-          : p.getOutCards > 0
-            ? '<span class="player-card__tag player-card__tag--key">' + icon("key", "ic-tag") + "&times;" + p.getOutCards + "</span>"
-            : "";
-
-      li.innerHTML =
-        '<div class="player-card__head">' +
-          badge(p.color, p.tokenStyle, "player-token") +
-          '<span class="player-card__name">' + p.name + " " + tag + "</span>" +
-          '<span class="player-card__cash ' + (p.cash < 100 ? "is-low" : "") + '">&euro;' + p.cash + "</span>" +
-        "</div>" +
-        '<div class="player-card__props">' + (chips || '<span class="player-card__empty">No properties yet</span>') + "</div>";
-      list.appendChild(li);
+    // rebuild the skeleton only when the roster itself changes
+    const ids = game.players.map((p) => p.id).join("|");
+    if (UI._rowsKey !== ids) {
+      UI._rowsKey = ids;
+      UI._rows.clear();
+      list.innerHTML = "";
+      for (const p of game.players) {
+        const row = makeRow(p);
+        UI._rows.set(p.id, row);
+        list.appendChild(row.el);
+      }
     }
+
+    const worths = game.players.map((p) => game.netWorth(p));
+    const topWorth = Math.max(1, ...worths);
+    let loudest = null; // biggest cash move this tick, for the sound
+
+    game.players.forEach((p, i) => {
+      const row = UI._rows.get(p.id);
+      if (!row) return;
+      const el = row.el;
+      const h = holdings(game, p);
+      const isTurn = p.id === game.current.id && game.phase !== "over";
+      const online = !UI.presence.size || UI.presence.get(p.id) !== false;
+
+      el.classList.toggle("is-turn", isTurn);
+      el.classList.toggle("is-bankrupt", p.bankrupt);
+      el.classList.toggle("is-me", p.id === myId);
+      el.classList.toggle("is-offline", !online);
+      el.classList.toggle("is-broke", !p.bankrupt && p.cash < 100);
+
+      if (row.name.textContent !== p.name) row.name.textContent = p.name;
+
+      const flags =
+        (!online ? '<b class="pf pf--off" title="Disconnected">' + icon("wifiOff", "ic-pf") + "</b>" : "") +
+        (p.bankrupt ? '<b class="pf pf--out" title="Bankrupt">OUT</b>'
+          : p.inJail ? '<b class="pf pf--jail" title="In prison">' + icon("lock", "ic-pf") + "</b>" : "") +
+        (p.id === myId ? '<b class="pf pf--you">YOU</b>' : "");
+      if (row.flagsHtml !== flags) { row.flags.innerHTML = flags; row.flagsHtml = flags; }
+
+      // money: roll the figure, float the delta, remember the biggest mover
+      const delta = p.cash - row.shown;
+      if (Math.abs(delta) >= 1) {
+        showDelta(row, delta);
+        if (!loudest || Math.abs(delta) > Math.abs(loudest.delta)) loudest = { p, delta };
+      }
+      rollCash(row, p.cash);
+
+      const pips = setPips(h.sets);
+      if (row.pipsHtml !== pips) { row.sets.innerHTML = pips; row.pipsHtml = pips; }
+      const assets = assetRow(h, p);
+      if (row.assetsHtml !== assets) { row.assets.innerHTML = assets; row.assetsHtml = assets; }
+
+      const share = p.bankrupt ? 0 : Math.max(0.02, worths[i] / topWorth);
+      row.worth.style.transform = "scaleX(" + share.toFixed(3) + ")";
+      row.el.title = p.name + " \u00b7 net worth " + money(worths[i]);
+    });
+
+    UI._cashSound(loudest, myId, game);
+  };
+
+  /**
+   * One money sound per repaint, from the local player's point of view — in
+   * hot-seat that means whoever is on turn. Playing every side of every
+   * transaction at once just turns into noise.
+   */
+  UI._cashSound = function (loudest, myId, game) {
+    if (!loudest || !window.BT.sfx) return;
+    const mine = myId ? loudest.p.id === myId : loudest.p.id === game.current.id;
+    if (!mine) return;
+    if (UI._skipCashSfx) { UI._skipCashSfx = false; return; }
+    if (loudest.delta > 0) window.BT.sfx.cashIn(loudest.delta);
+    else window.BT.sfx.cashOut(loudest.delta);
+  };
+
+  /** Suppress the next money sound (the caller is playing a richer one). */
+  UI.muteNextCashSound = function () { UI._skipCashSfx = true; };
+
+  /**
+   * Online-mode presence update.
+   * @param {Map<string,boolean>|Record<string,boolean>} map playerId -> connected
+   */
+  UI.setPresence = function (map) {
+    UI.presence = map instanceof Map ? new Map(map) : new Map(Object.entries(map || {}));
+    const g = (window.BT.mp && window.BT.mp.game) || UI.game || window.BT.game;
+    if (g) UI.renderPlayers(g);
+  };
+
+  /** Per-row turn-timer fill (online play). `frac` 0..1, null clears it. */
+  UI.setRowClock = function (playerId, frac) {
+    for (const [id, row] of UI._rows) {
+      const active = id === playerId && frac != null;
+      row.el.classList.toggle("has-clock", active);
+      if (active) row.clock.style.transform = "scaleX(" + Math.max(0, Math.min(1, frac)).toFixed(3) + ")";
+    }
+  };
+
+  /** Flash a row when that seat drops or comes back. */
+  UI.pulsePlayer = function (playerId, kind) {
+    const row = UI._rows.get(playerId);
+    if (!row) return;
+    const cls = kind === "online" ? "just-online" : "just-offline";
+    row.el.classList.remove("just-online", "just-offline");
+    void row.el.offsetWidth; // restart the animation
+    row.el.classList.add(cls);
+    setTimeout(() => row.el.classList.remove(cls), 1500);
   };
   /* ================= Action log (bottom, newest last) ================= */
 
@@ -233,7 +505,20 @@
   UI.setTurnChip = function (game) {
     const chip = $("#turn-chip");
     if (!game || game.phase === "over") return;
-    chip.innerHTML = "<strong>" + game.current.name + "</strong>&nbsp;&middot; Round " + game.round;
+    const p = game.current;
+    const mine = !window.BT.myPlayerId || window.BT.myPlayerId === p.id;
+    chip.classList.toggle("is-mine", mine);
+    chip.style.setProperty("--pc", p.color);
+    chip.innerHTML =
+      '<i class="turn-chip__dot"></i>' +
+      "<strong>" + esc(p.name) + "</strong>" +
+      '<span class="turn-chip__round">R' + game.round + "</span>";
+
+    // a soft cue the first time a turn becomes yours
+    if (mine && UI._turnCueFor !== p.id + ":" + game.round && game.phase === "awaiting-roll") {
+      UI._turnCueFor = p.id + ":" + game.round;
+      window.BT.sfx && window.BT.sfx.turn();
+    }
   };
 
   UI.setStatusRaw = function (html) {
@@ -273,7 +558,8 @@
     $("#btn-roll").disabled = !mine || !(phase === "awaiting-roll" || phase === "awaiting-jail-roll");
     $("#btn-roll").innerHTML =
       '<span class="btn-ic">' + icon("dice") + "</span>" +
-      (phase === "awaiting-jail-roll" ? "Roll Doubles" : "Roll Dice");
+      (phase === "awaiting-jail-roll" ? "Roll Doubles" : "Roll Dice") +
+      '<kbd class="btn-kbd">R</kbd>';
     $("#btn-end-turn").disabled = !mine || phase !== "turn-end";
     const canBuild =
       (phase === "awaiting-roll" || phase === "turn-end") &&
@@ -304,8 +590,36 @@
   };
   /* ================= Modals (Promise-based) ================= */
 
-  function openModal(id) { $(id).hidden = false; }
-  function closeModal(id) { $(id).hidden = true; }
+  function openModal(id, silent) {
+    $(id).hidden = false;
+    if (!silent && window.BT.sfx) window.BT.sfx.open();
+  }
+
+  function closeModal(id, silent) {
+    $(id).hidden = true;
+    if (!silent && window.BT.sfx) window.BT.sfx.close();
+  }
+
+  /** The modal currently on top, if any. */
+  function topModal() {
+    const open = [...document.querySelectorAll(".modal-overlay")].filter((m) => !m.hidden);
+    return open.length ? open[open.length - 1] : null;
+  }
+
+  /* Enter takes the primary action, Escape the safe one — so a whole turn can
+   * be played without reaching for the mouse. */
+  document.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const modal = topModal();
+    if (!modal) return;
+    if (e.key === "Enter") {
+      const primary = modal.querySelector(".btn-primary:not(:disabled)");
+      if (primary) { e.preventDefault(); primary.click(); }
+    } else if (e.key === "Escape") {
+      const secondary = [...modal.querySelectorAll(".btn:not(.btn-primary):not(:disabled)")][0];
+      if (secondary) { e.preventDefault(); secondary.click(); }
+    }
+  });
 
   UI.hydrateIcons = function (root) {
     (root || document).querySelectorAll("[data-icon]").forEach((el) => {
@@ -317,6 +631,18 @@
     return new Promise((resolve) => {
       const isCity = tile.kind === "city";
       const flag = $("#buy-colorbar");
+      // tilted plate preview: flag ground for cities, kind gradient otherwise
+      const plate = $("#buy-preview-plate");
+      const piece = $("#buy-preview-piece");
+      if (plate && piece) {
+        plate.style.cssText = isCity
+          ? flagBg(tile.country)
+          : "background:linear-gradient(150deg," + kindColor(tile) + ",#12171f)";
+        piece.innerHTML = icon(
+          isCity ? "house" : tile.kind === "airport" ? "plane" : tile.id === "balkan-electric" ? "zap" : "bottle",
+          "ic-piece",
+        );
+      }
       if (isCity) {
         const c = COUNTRIES[tile.country];
         flag.style.cssText = flagBg(tile.country);
@@ -381,7 +707,7 @@
         box.appendChild(ok);
       }
 
-      openModal("#modal-card");
+      openModal("#modal-card", true); // the card has its own paper-slide sound
       window.BT.sfx && window.BT.sfx.card();
     });
   };
@@ -527,8 +853,10 @@
 
   UI.setRoomChip = function (code) {
     const chip = $("#room-chip");
-    if (!code) { chip.hidden = true; return; }
+    if (!code) { chip.hidden = true; delete chip.dataset.code; return; }
     chip.hidden = false;
+    chip.dataset.code = code;
+    chip.classList.remove("is-reconnecting");
     chip.textContent = code;
     chip.title = "Room code — click to copy";
     chip.onclick = () => {
@@ -538,12 +866,49 @@
     };
   };
 
-  UI.setTurnTimer = function (seconds) {
+  /** Transport state: flips the room chip into a "reconnecting" pill. */
+  UI.setConnState = function (online) {
+    const chip = $("#room-chip");
+    if (!chip) return;
+    if (online) {
+      chip.classList.remove("is-reconnecting");
+      if (chip.dataset.code) chip.textContent = chip.dataset.code;
+      return;
+    }
+    chip.hidden = false;
+    chip.classList.add("is-reconnecting");
+    chip.textContent = "Reconnecting\u2026";
+  };
+
+  /**
+   * Turn clock. Also drives the thin fill along the active ledger row, so you
+   * can read the remaining time without looking away from the players.
+   * @param {number|null} seconds remaining, null hides the clock
+   * @param {number} [total] configured turn length, for the row fill
+   */
+  UI.setTurnTimer = function (seconds, total) {
     const el = $("#turn-timer");
-    if (seconds == null) { el.hidden = true; return; }
+    if (seconds == null) {
+      el.hidden = true;
+      UI.setRowClock(null, null);
+      UI._lastWarn = null;
+      return;
+    }
     el.hidden = false;
     $("#timer-value").textContent = seconds;
-    el.classList.toggle("is-low", seconds <= 10);
+    const low = seconds <= 10;
+    el.classList.toggle("is-low", low);
+
+    const g = (window.BT.mp && window.BT.mp.game) || UI.game || window.BT.game;
+    if (g && total > 0) UI.setRowClock(g.current.id, seconds / total);
+
+    // one tick at 10s and one at 5s, only for the player on the clock
+    const mine = g && (!window.BT.myPlayerId || window.BT.myPlayerId === g.current.id);
+    if (mine && (seconds === 10 || seconds === 5) && UI._lastWarn !== seconds) {
+      UI._lastWarn = seconds;
+      window.BT.sfx && window.BT.sfx.warn();
+    }
+    if (seconds > 10) UI._lastWarn = null;
   };
 
   /* ---------- trade composer: balances + money sliders ---------- */
@@ -711,26 +1076,297 @@
     };
   };
 
-  /* ---------- incoming trade ---------- */
+  /* ================= Incoming trades: left-side dock ================= */
 
-  UI.incomingTrade = function (game, trade, fromName, handlers) {
-    const names = (ids) => ids.map((id) => (tileById(id) || {}).name).filter(Boolean).join(", ") || "—";
-    $("#trade-incoming-from").textContent = fromName + " proposes:";
-    $("#trade-incoming-summary").innerHTML =
-      "<div><strong>" + fromName + " gives:</strong> " +
-      (trade.giveCash ? "&euro;" + trade.giveCash + " " : "") + names(trade.giveTiles) + "</div>" +
-      "<div><strong>You give:</strong> " +
-      (trade.wantCash ? "&euro;" + trade.wantCash + " " : "") + names(trade.wantTiles) + "</div>";
-    const modal = document.querySelector("#modal-trade-incoming .modal");
-    modal.classList.remove("deal-in");
-    void modal.offsetWidth; // restart animation
-    modal.classList.add("deal-in");
-    openModal("#modal-trade-incoming");
+  /* Offers arrive as cards in a fixed column on the left edge, newest on top.
+   * Each card slides in from off-screen (300ms ease-out), lists what you get
+   * and what you give with a tag per item, and previews both inventories on
+   * hover so you can see exactly what is changing hands. */
+
+  const ASSET_TAGS = {
+    city: { label: "City", icon: "building" },
+    airport: { label: "Airport", icon: "plane" },
+    utility: { label: "Power", icon: "zap" },
+    cash: { label: "Cash", icon: "coins" },
+  };
+
+  let tradeSeq = 0;
+
+  const tradeDock = () => $("#trade-dock");
+
+  function assetTag(kind) {
+    const t = ASSET_TAGS[kind] || ASSET_TAGS.city;
+    return '<em class="tc-tag tc-tag--' + kind + '">' + icon(t.icon, "ic-tag") + t.label + "</em>";
+  }
+
+  /** One row inside a "you receive" / "you give" column. */
+  function tradeItemRow(tile) {
+    const lead = tile.kind === "city"
+      ? '<i class="tc-flag" style="' + flagBg(tile.country) + '"></i>'
+      : '<i class="tc-dot" style="background:' + kindColor(tile) + '"></i>';
+    return '<li class="tc-item" data-tile="' + esc(tile.id) + '">' +
+      lead + '<span class="tc-name">' + esc(tile.name) + "</span>" +
+      assetTag(tile.kind) + "</li>";
+  }
+
+  function cashItemRow(amount) {
+    return '<li class="tc-item tc-item--cash">' +
+      '<i class="tc-dot tc-dot--cash">' + icon("coins", "ic-coin") + "</i>" +
+      '<span class="tc-name">&euro;' + amount + "</span>" +
+      assetTag("cash") + "</li>";
+  }
+
+  function tradeColumn(kind, title, cash, tileIds) {
+    const tiles = (tileIds || []).map((id) => tileById(id)).filter(Boolean);
+    const rows = (cash > 0 ? cashItemRow(cash) : "") + tiles.map(tradeItemRow).join("");
+    return '<section class="tc-col tc-col--' + kind + '">' +
+      '<h4 class="tc-col__title">' + title +
+        '<b class="tc-col__n">' + (tiles.length + (cash > 0 ? 1 : 0)) + "</b></h4>" +
+      '<ul class="tc-items">' + (rows || '<li class="tc-item tc-item--none">nothing</li>') + "</ul>" +
+      "</section>";
+  }
+
+  /** Inventory grid for one side of the deal, traded rows highlighted. */
+  function invGrid(game, player, markIds, mark) {
+    if (!player) return "";
+    const marked = new Set(markIds || []);
+    const cells = game.ownedTiles(player).map((t) => {
+      const lead = t.kind === "city"
+        ? '<i class="tc-flag" style="' + flagBg(t.country) + '"></i>'
+        : '<i class="tc-dot" style="background:' + kindColor(t) + '"></i>';
+      const h = game.props[t.id].houses || 0;
+      const pips = h >= ECONOMY.maxHouses
+        ? icon("star", "ic-inv")
+        : Array.from({ length: h }, () => icon("house", "ic-inv")).join("");
+      return '<span class="inv-cell' + (marked.has(t.id) ? " is-" + mark : "") + '">' +
+        lead + esc(t.name) + pips + "</span>";
+    });
+    return '<div class="tc-inv__block">' +
+      '<div class="tc-inv__head">' + esc(player.name) +
+        '<b>&euro;' + player.cash + "</b></div>" +
+      '<div class="tc-inv__grid">' +
+        (cells.length ? cells.join("") : '<span class="inv-cell is-empty">no property</span>') +
+      "</div></div>";
+  }
+
+  /**
+   * Show an incoming offer as a dock card.
+   * @param {object} game engine (or hydrated view)
+   * @param {object} trade { giveCash, giveTiles, wantCash, wantTiles, from?, to? }
+   * @param {string} fromName sender display name
+   * @param {{onAccept:Function, onDecline:Function, onCounter?:Function}} handlers
+   * @param {{fromId?:string}} [meta]
+   * @returns {string} card id (pass to UI.dismissTrade)
+   */
+  UI.incomingTrade = function (game, trade, fromName, handlers, meta) {
+    const dock = tradeDock();
+    if (!dock) return "";
+    const id = "tc" + ++tradeSeq;
+    const fromId = (meta && meta.fromId) || trade.from || null;
+    const sender = fromId && game ? game.player(fromId) : null;
+    const me = game ? game.player(window.BT.myPlayerId) : null;
+
+    const card = document.createElement("article");
+    card.className = "trade-card";
+    card.dataset.tradeId = id;
+    if (fromId) card.dataset.fromId = fromId;
+    if (sender) {
+      card.style.setProperty("--pc", sender.color);
+      card.style.setProperty("--pc-45", hexA(sender.color, 0.45));
+    }
+
+    card.innerHTML =
+      '<header class="tc-head">' +
+        (sender ? badge(sender.color, sender.tokenStyle, "tc-avatar") : icon("users", "tc-avatar-ic")) +
+        '<span class="tc-from"><b>' + esc(fromName) + "</b> sends you:</span>" +
+        '<span class="tc-badge">' + icon("exchange", "ic-tag") + "Trade</span>" +
+      "</header>" +
+      '<div class="tc-cols">' +
+        tradeColumn("get", "You receive", trade.giveCash, trade.giveTiles) +
+        tradeColumn("give", "You give", trade.wantCash, trade.wantTiles) +
+      "</div>" +
+      '<footer class="tc-actions">' +
+        '<button class="tc-btn tc-btn--ok" type="button" data-act="accept">' +
+          icon("check", "ic-tag") + "Accept</button>" +
+        (handlers.onCounter
+          ? '<button class="tc-btn tc-btn--alt" type="button" data-act="counter" title="Counter-offer">' +
+            icon("exchange", "ic-tag") + "</button>"
+          : "") +
+        '<button class="tc-btn tc-btn--no" type="button" data-act="decline">' +
+          icon("x", "ic-tag") + "Decline</button>" +
+      "</footer>" +
+      '<div class="tc-inv" hidden>' +
+        invGrid(game, sender, trade.giveTiles, "get") +
+        invGrid(game, me, trade.wantTiles, "give") +
+      "</div>";
+
+    dock.prepend(card);
+    // slide in from the left on the next frame so the transition actually runs
+    requestAnimationFrame(() => card.classList.add("is-in"));
+
+    /* hover anywhere over the items reveals both inventories */
+    const inv = card.querySelector(".tc-inv");
+    const showInv = () => { inv.hidden = false; requestAnimationFrame(() => inv.classList.add("is-in")); };
+    const hideInv = () => { inv.classList.remove("is-in"); inv.hidden = true; };
+    card.querySelectorAll(".tc-items").forEach((box) => {
+      box.addEventListener("mouseenter", showInv);
+      box.addEventListener("focusin", showInv);
+    });
+    card.addEventListener("mouseleave", hideInv);
+
+    const finish = (fn, sound) => {
+      if (card.dataset.done) return;
+      card.dataset.done = "1";
+      if (sound && window.BT.sfx && window.BT.sfx[sound]) window.BT.sfx[sound]();
+      closeTradeCard(card);
+      if (typeof fn === "function") fn();
+    };
+
+    card.querySelector('[data-act="accept"]').onclick = () => finish(handlers.onAccept, "deal");
+    card.querySelector('[data-act="decline"]').onclick = () => finish(handlers.onDecline, "decline");
+    const counterBtn = card.querySelector('[data-act="counter"]');
+    if (counterBtn) counterBtn.onclick = () => finish(handlers.onCounter, null);
+
     window.BT.sfx && window.BT.sfx.receive();
-    const done = (fn) => { closeModal("#modal-trade-incoming"); fn(); };
-    $("#btn-trade-accept").onclick = () => done(handlers.onAccept);
-    $("#btn-trade-decline").onclick = () => done(handlers.onDecline);
-    $("#btn-trade-counter").onclick = () => done(handlers.onCounter);
+    dock.classList.remove("is-pinged");
+    void dock.offsetWidth;
+    dock.classList.add("is-pinged");
+    return id;
+  };
+
+  function closeTradeCard(card) {
+    card.classList.add("is-out");
+    setTimeout(() => card.remove(), 260);
+  }
+
+  /** Drop a specific offer card (stale trade, sender left, host applied it). */
+  UI.dismissTrade = function (id) {
+    const card = tradeDock() && tradeDock().querySelector('[data-trade-id="' + id + '"]');
+    if (card && !card.dataset.done) { card.dataset.done = "1"; closeTradeCard(card); }
+  };
+
+  /** Drop every pending offer from one player (they disconnected / went bankrupt). */
+  UI.dismissTradesFrom = function (playerId) {
+    const dock = tradeDock();
+    if (!dock) return 0;
+    const cards = [...dock.querySelectorAll('[data-from-id="' + String(playerId) + '"]')]
+      .filter((c) => !c.dataset.done);
+    cards.forEach((c) => { c.dataset.done = "1"; closeTradeCard(c); });
+    return cards.length;
+  };
+
+  UI.clearTrades = function () {
+    const dock = tradeDock();
+    if (dock) dock.innerHTML = "";
+  };
+
+  /* ================= Session log (collapsible, left dock) ================= */
+
+  /* Everything that happened while you were away: disconnects, trades,
+   * purchases and host migrations, each with a wall-clock timestamp. The
+   * relay replays its ring buffer on rejoin so a returning player can read
+   * back the whole match. */
+
+  const clockOf = (timestamp) => {
+    const d = new Date(Number(timestamp) || Date.now());
+    return d.toTimeString().slice(0, 8);
+  };
+
+  UI.showSessionLog = function (show) {
+    const box = $("#session-log");
+    if (box) box.hidden = !show;
+  };
+
+  UI.pushSessionEvent = function (entry) {
+    const list = $("#session-log-list");
+    const box = $("#session-log");
+    if (!list || !box || !entry) return;
+    box.hidden = false;
+    const li = document.createElement("li");
+    li.className = "slog-entry";
+    li.innerHTML =
+      '<span class="slog-ic" style="color:' + (entry.color || "#8b98a8") + '">' +
+        anyIcon(entry.icon || "clock") + "</span>" +
+      '<span class="slog-tx">' + esc(entry.text || "") + "</span>" +
+      '<time class="slog-at">' + clockOf(entry.timestamp) + "</time>";
+    list.appendChild(li);
+    while (list.children.length > 120) list.firstChild.remove();
+    $("#session-log-count").textContent = String(list.children.length);
+    list.scrollTop = list.scrollHeight;
+  };
+
+  /** Replace the whole log (used when the relay replays history on rejoin). */
+  UI.setSessionLog = function (entries) {
+    const list = $("#session-log-list");
+    if (!list) return;
+    list.innerHTML = "";
+    for (const e of entries || []) UI.pushSessionEvent(e);
+    $("#session-log-count").textContent = String(list.children.length);
+  };
+
+  /* ================= Purchase feedback ================= */
+
+  /** Coins arcing from a player's card to the tile they just bought. */
+  function coinFlight(fromEl, toEl, color) {
+    if (!fromEl || !toEl || typeof toEl.animate !== "function") return;
+    const a = fromEl.getBoundingClientRect();
+    const b = toEl.getBoundingClientRect();
+    const layer = document.createElement("div");
+    layer.className = "coin-fx";
+    document.body.appendChild(layer);
+
+    const x0 = a.left + a.width / 2, y0 = a.top + a.height / 2;
+    const x1 = b.left + b.width / 2, y1 = b.top + b.height / 2;
+
+    for (let i = 0; i < 7; i++) {
+      const coin = document.createElement("span");
+      coin.className = "coin";
+      if (color) coin.style.setProperty("--coin-tint", color);
+      coin.style.left = x0 + "px";
+      coin.style.top = y0 + "px";
+      layer.appendChild(coin);
+      const jitter = (Math.random() - 0.5) * 34;
+      const lift = -60 - Math.random() * 50;
+      coin.animate([
+        { transform: "translate(-50%,-50%) scale(.5)", opacity: 0 },
+        { transform: "translate(-50%,-50%) scale(1)", opacity: 1, offset: 0.14 },
+        {
+          transform: "translate(calc(-50% + " + ((x1 - x0) / 2 + jitter) + "px), calc(-50% + " +
+            ((y1 - y0) / 2 + lift) + "px)) scale(1.05)",
+          opacity: 1, offset: 0.6,
+        },
+        {
+          transform: "translate(calc(-50% + " + (x1 - x0) + "px), calc(-50% + " + (y1 - y0) + "px)) scale(.35)",
+          opacity: 0,
+        },
+      ], {
+        duration: 620 + i * 45,
+        delay: i * 42,
+        easing: "cubic-bezier(.32,.72,.35,1)",
+        fill: "forwards",
+      });
+    }
+    setTimeout(() => layer.remove(), 1300);
+  }
+
+  /**
+   * "You bought it" moment: the tile pops with a shadow pulse and coins fly
+   * from the buyer's panel card onto the board.
+   * @param {string} tileId
+   * @param {{id:string,color:string}} player buyer
+   */
+  UI.celebratePurchase = function (tileId, player) {
+    const index = window.BT.tileIndex(tileId);
+    const tileEl = UI.tileEls[index];
+    if (tileEl) {
+      tileEl.classList.remove("just-bought");
+      void tileEl.offsetWidth;
+      tileEl.classList.add("just-bought");
+      setTimeout(() => tileEl.classList.remove("just-bought"), 900);
+    }
+    const card = player && $('.player-card[data-player-id="' + String(player.id) + '"]');
+    coinFlight(card || $("#action-status"), tileEl, player && player.color);
+    window.BT.sfx && window.BT.sfx.buy();
   };
 
   window.BT = Object.assign(window.BT || {}, { UI });

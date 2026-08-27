@@ -20,6 +20,9 @@
 
   const dice = new DiceManager($("#dice-canvas"));
   const pawnLayer = new PawnLayer($("#board"), UI.tileEls);
+  // exposed for console debugging, same as BT.game / BT.mp
+  window.BT.dice = dice;
+  window.BT.pawnLayer = pawnLayer;
 
   let game = null; // local-mode engine
   let mp = null;   // online-mode controller
@@ -31,6 +34,10 @@
     window.BT.mpActive = false;
     window.BT.Lobby.closeMenu();
     UI.setRoomChip(null);
+    // local play has no presence / relay history to show
+    UI.setPresence(new Map());
+    UI.clearTrades();
+    UI.showSessionLog(false);
 
     game = new Game(defs, {
       log: UI.log,
@@ -49,9 +56,25 @@
       },
       teleportPawn: (player, pos) => pawnLayer.placeAt(player.id, pos),
       removePawn: (player) => pawnLayer.removePlayer(player.id),
-      setJailed: (player, jailed) => pawnLayer.setJailed(player.id, jailed),
+      setJailed: (player, jailed) => {
+        pawnLayer.setJailed(player.id, jailed);
+        if (jailed) window.BT.sfx.jail();
+      },
 
       promptBuy: (player, tile, price) => UI.promptBuy(player, tile, price),
+      boughtProperty: (player, tile) => {
+        UI.muteNextCashSound(); // the purchase sound already covers the money
+        UI.celebratePurchase(tile.id, player);
+      },
+      builtOn: (player, tile, level) => {
+        UI.muteNextCashSound();
+        if (level >= ECONOMY.maxHouses) window.BT.sfx.hotel();
+        else window.BT.sfx.build();
+      },
+      soldOn: () => { UI.muteNextCashSound(); window.BT.sfx.sell(); },
+      paidRent: (_payer, _owner, amount) => { UI.muteNextCashSound(); window.BT.sfx.rent(amount); },
+      paidTax: (_player, amount) => { UI.muteNextCashSound(); window.BT.sfx.tax(amount); },
+      bankrupted: () => window.BT.sfx.bankrupt(),
       showCard: (card) => UI.showCard(card),
       auctionStep: (ctx) => UI.auctionStep(ctx),
       jailChoice: (player) => {
@@ -162,21 +185,73 @@
 
   /* ---------- action bar ---------- */
 
+  const activeGame = () => (mp ? mp.game : game);
+
+  /** Open the trade composer, optionally aimed at a specific player. */
+  function openTrade(prefillTo) {
+    if (mp) return mp.openTradeComposer(prefillTo || null);
+    const g = game;
+    if (!g) return;
+    // local hot-seat: both sides are at the table, so apply it immediately
+    UI.openTrade(g, g.current.id, {
+      prefillTo: prefillTo && prefillTo !== g.current.id ? prefillTo : null,
+      onSend: (trade) => {
+        UI.muteNextCashSound(); // the deal chime covers the cash movement
+        if (g.applyTrade({ ...trade, from: g.current.id })) window.BT.sfx.deal();
+      },
+    });
+  }
+
   $("#btn-roll").addEventListener("click", () => (mp ? mp.clickRoll() : game && game.roll()));
   $("#btn-end-turn").addEventListener("click", () => (mp ? mp.clickEndTurn() : game && game.endTurn()));
   $("#btn-build").addEventListener("click", () => {
-    const g = mp ? mp.game : game;
+    const g = activeGame();
     if (g) UI.openBuild(g);
   });
-  $("#btn-trade").addEventListener("click", () => {
-    if (mp) return mp.openTradeComposer();
-    if (!game) return;
-    // local hot-seat: both players are present — apply the trade directly
-    UI.openTrade(game, game.current.id, {
-      onSend: (trade) => {
-        if (game.applyTrade({ ...trade, from: game.current.id })) window.BT.sfx.deal();
-      },
-    });
+  $("#btn-trade").addEventListener("click", () => openTrade());
+
+  /* ---------- input polish ---------- */
+
+  /* One quiet tick for every real control, wired once at the document level so
+   * new markup (trade cards, lobby swatches) gets it for free. */
+  document.addEventListener("pointerdown", (e) => {
+    const hit = e.target.closest("button, .path-card, .swatch, .style-opt, .trade-prop, .pl, summary");
+    if (!hit || hit.disabled || hit.getAttribute("aria-disabled") === "true") return;
+    window.BT.sfx.click();
+  }, { passive: true });
+
+  /* Click a player in the ledger to open a trade aimed at them. */
+  $("#player-list").addEventListener("click", (e) => {
+    const row = e.target.closest(".pl");
+    const g = activeGame();
+    if (!row || !g || g.phase === "over") return;
+    const id = row.dataset.playerId;
+    const me = window.BT.myPlayerId;
+    if (!id || (me && id === me) || $("#btn-trade").disabled) return;
+    const target = g.player(id);
+    if (!target || target.bankrupt) return;
+    openTrade(id);
+  });
+
+  /* Keyboard: R roll, E end turn, B build, T trade. Modals handle their own
+   * Enter/Escape (see ui.js), and anything typed in a field is left alone. */
+  const KEYS = { r: "#btn-roll", e: "#btn-end-turn", b: "#btn-build", t: "#btn-trade" };
+
+  document.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+    const el = document.activeElement;
+    if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+    if (!$("#screen-menu").hidden) return; // pre-game menu owns the keyboard
+    if ([...document.querySelectorAll(".modal-overlay")].some((m) => !m.hidden)) return;
+
+    let sel = KEYS[e.key.toLowerCase()];
+    // space rolls too, unless a button already has focus and will handle it
+    if (!sel && e.key === " " && !(el && el.tagName === "BUTTON")) sel = "#btn-roll";
+    if (!sel) return;
+    const btn = $(sel);
+    if (!btn || btn.disabled) return;
+    e.preventDefault();
+    btn.click();
   });
 
   /* ---------- saved-session resume (page reload mid-lobby/match) ---------- */

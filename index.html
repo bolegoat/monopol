@@ -24,6 +24,10 @@
             <span class="brand-name">Balkan&nbsp;<em>Tycoon</em></span>
           </div>
           <div class="top-bar-right">
+            <button class="icon-btn" id="btn-audio" type="button"
+                    title="Sound &amp; music settings" aria-label="Sound and music settings">
+              <span class="icon-btn__ic" id="audio-btn-ic" data-icon="volumeMute"></span>
+            </button>
             <span class="room-chip" id="room-chip" hidden></span>
             <span class="turn-timer" id="turn-timer" hidden>
               <span class="timer-ic" data-icon="clock"></span><b id="timer-value">45</b>
@@ -51,13 +55,13 @@
           <div class="action-status" id="action-status">Set up a game to begin.</div>
           <div class="action-buttons">
             <button class="btn" id="btn-trade" disabled>
-              <span class="btn-ic" data-icon="exchange"></span>Trade
+              <span class="btn-ic" data-icon="exchange"></span>Trade<kbd class="btn-kbd">T</kbd>
             </button>
             <button class="btn" id="btn-build" disabled>
-              <span class="btn-ic" data-icon="house"></span>Build
+              <span class="btn-ic" data-icon="house"></span>Build<kbd class="btn-kbd">B</kbd>
             </button>
             <button class="btn" id="btn-end-turn" disabled>
-              <span class="btn-ic" data-icon="arrowRight"></span>End Turn
+              <span class="btn-ic" data-icon="arrowRight"></span>End Turn<kbd class="btn-kbd">E</kbd>
             </button>
             <button class="btn btn-primary" id="btn-roll" disabled>
               <span class="btn-ic" data-icon="dice"></span>Roll Dice
@@ -77,6 +81,20 @@
           <h2 class="panel-title">Action Log</h2>
           <ul class="log-list" id="log-list"></ul>
         </section>
+      </aside>
+
+      <!-- ============ LEFT DOCK: trade offers + session log ============ -->
+      <aside class="left-dock" id="left-dock">
+        <div class="trade-dock" id="trade-dock" aria-live="polite" aria-label="Trade offers"></div>
+        <details class="session-log" id="session-log" hidden>
+          <summary class="session-log__head">
+            <span class="session-log__ic" data-icon="history"></span>
+            <span class="session-log__title">Session log</span>
+            <b class="session-log__count" id="session-log-count">0</b>
+            <span class="session-log__chev" data-icon="chevronDown"></span>
+          </summary>
+          <ol class="session-log__list" id="session-log-list"></ol>
+        </details>
       </aside>
 
       <!-- ============ PRE-GAME MENU / LOBBY SCREEN ============ -->
@@ -254,12 +272,17 @@
       <div class="modal-overlay" id="modal-buy" hidden>
         <div class="modal">
           <div class="modal-flag" id="buy-colorbar"></div>
+          <!-- tilted plate + building silhouette: a cheap 3D read of the plot -->
+          <div class="buy-preview" aria-hidden="true">
+            <span class="buy-preview__plate" id="buy-preview-plate"></span>
+            <span class="buy-preview__piece" id="buy-preview-piece"></span>
+          </div>
           <h2 class="modal-title" id="buy-name">Property</h2>
           <p class="modal-sub" id="buy-country"></p>
           <div class="modal-price" id="buy-price"></div>
           <p class="modal-note" id="buy-rent"></p>
           <div class="modal-actions">
-            <button class="btn" id="btn-pass">Pass</button>
+            <button class="btn" id="btn-pass">Skip</button>
             <button class="btn btn-primary" id="btn-buy">Buy</button>
           </div>
         </div>
@@ -394,16 +417,40 @@
         </div>
       </div>
 
-      <!-- incoming trade -->
-      <div class="modal-overlay" id="modal-trade-incoming" hidden>
-        <div class="modal modal-trade">
-          <h2 class="modal-title">Incoming Trade</h2>
-          <p class="modal-sub" id="trade-incoming-from"></p>
-          <div class="trade-summary" id="trade-incoming-summary"></div>
-          <div class="modal-actions modal-actions-col">
-            <button class="btn btn-primary" id="btn-trade-accept">Accept</button>
-            <button class="btn" id="btn-trade-counter">Counter-offer</button>
-            <button class="btn" id="btn-trade-decline">Decline</button>
+      <!-- incoming trades render as slide-in cards in #trade-dock (see ui.js) -->
+
+      <!-- sound & music settings -->
+      <div class="modal-overlay" id="modal-audio" hidden>
+        <div class="modal modal-audio">
+          <div class="modal-card-icon" data-icon="volume"></div>
+          <h2 class="modal-title">Sound &amp; Music</h2>
+          <p class="modal-note">Audio starts muted — browsers block sound until you ask for it.</p>
+
+          <label class="switch-row">
+            <span class="switch-txt"><b>Mute everything</b><small>Silences the ambience and all effects</small></span>
+            <input type="checkbox" id="audio-mute" />
+            <i class="knob" aria-hidden="true"></i>
+          </label>
+
+          <div class="audio-row">
+            <span class="audio-row__ic" data-icon="music"></span>
+            <span class="audio-row__lbl">Music</span>
+            <input type="range" class="audio-slider" id="audio-music" min="0" max="100" step="1" value="45"
+                   aria-label="Music volume" />
+            <b class="audio-row__val" id="audio-music-val">45%</b>
+          </div>
+
+          <div class="audio-row">
+            <span class="audio-row__ic" data-icon="volume"></span>
+            <span class="audio-row__lbl">Effects</span>
+            <input type="range" class="audio-slider" id="audio-sfx" min="0" max="100" step="1" value="70"
+                   aria-label="Sound effects volume" />
+            <b class="audio-row__val" id="audio-sfx-val">70%</b>
+          </div>
+
+          <div class="modal-actions">
+            <button class="btn" id="btn-audio-test" type="button">Test effects</button>
+            <button class="btn btn-primary" id="btn-audio-close" type="button">Done</button>
           </div>
         </div>
       </div>
@@ -443,6 +490,7 @@
     <script src="js/ui.js"></script>
     <script src="js/deed.js"></script>
     <script src="js/buildings.js"></script>
+    <script src="js/settings.js"></script>
     <script src="js/lobby.js"></script>
     <script src="js/mp.js"></script>
     <script src="js/main.js"></script>

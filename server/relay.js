@@ -10,8 +10,13 @@
  * client → server
  *   room:create   (profile, cb -> { ok, code, token })
  *   room:join     (code, profile, cb -> { ok, token })
- *   room:rejoin   (code, token, cb -> { ok, isHost })
+ *   room:rejoin   (code, token, opts, cb -> { ok, isHost })
+ *                 opts = { resumeHost:boolean } — a transport-level reconnect
+ *                 from a host whose engine is still live in memory keeps
+ *                 authority; a page reload does not.
  *   room:leave    ()
+ *   net:ping      (cb -> { t })                       5s client heartbeat
+ *   room:log      ({ type, text, playerId })          [host] match history
  *   lobby:ready   (ready:boolean)
  *   game:start    ()                                  [host]
  *   host:state    (snapshot)                          [host → server → guests]
@@ -40,8 +45,21 @@
  *   trade:offer   (trade, fromId)   relayed to target only
  *   trade:respond (payload, fromId) relayed to host only
  *   host:migrated ({ hostId, state })  new host must take over the engine
+ *   room:event    ({ type, playerId, name, text, ts })  single history entry
+ *   room:history  ([entry, ...])        full replay, sent on rejoin
  *   chat:message  ({ name, color, text, system })
  *   error         (message)
+ *
+ * Disconnect policy (never block a match on an absent player)
+ * ──────────────────────────────────────────────────────────
+ *   - A dropped seat is kept, flagged `connected:false` with `disconnectedAt`,
+ *     and announced as a `player_disconnected` history entry.
+ *   - Host authority migrates to the next connected seat (lowest seat index)
+ *     after HOST_GRACE_MS, cancelled if the host returns first.
+ *   - Heartbeats: clients ping every 5s, the sweeper drops silent seats after
+ *     PING_TIMEOUT_MS so half-open sockets can't stall a room.
+ *   - Rejoin restores the seat, the latest snapshot, the live turn deadline
+ *     and the full event history.
  * ========================================================================== */
 
 import http from "node:http";
@@ -54,6 +72,17 @@ const PORT = Number(process.env.PORT ?? 3000);
 const ROOT = path.join(import.meta.dirname, "..");
 const MAX_PLAYERS = 6;
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+const HOST_GRACE_MS = 15_000;   // host offline this long -> migrate authority
+const PING_TIMEOUT_MS = 15_000; // no heartbeat this long -> treat as offline
+const SWEEP_MS = 5_000;         // heartbeat sweeper cadence
+const LOG_MAX = 200;            // per-room history ring buffer
+
+/* History entry types the host is allowed to push (anything else is dropped). */
+const HOST_LOG_TYPES = new Set([
+  "property_bought", "property_auctioned", "trade_offer", "trade_accepted",
+  "trade_declined", "turn_skipped", "player_bankrupt", "match_over", "house_built",
+]);
 
 /* Lobby palette (must match js/tokens.js PLAYER_COLORS). */
 const PALETTE = [
@@ -95,6 +124,8 @@ const rooms = new Map();
  * @property {"lobby"|"playing"|"finished"} status
  * @property {object|null} state   latest host snapshot (for migration/late join)
  * @property {number|null} turnDeadline
+ * @property {Array<object>} log   history ring buffer (replayed on rejoin)
+ * @property {*} hostGrace         pending host-migration timer, if any
  */
 
 /**
@@ -103,6 +134,8 @@ const rooms = new Map();
  * @property {string} token   stable player id (survives reconnects)
  * @property {boolean} ready
  * @property {boolean} connected
+ * @property {number} lastPing        epoch ms of the last heartbeat
+ * @property {number|null} disconnectedAt epoch ms the seat went dark
  */
 
 function newCode() {
@@ -142,6 +175,7 @@ function publicRoom(room) {
       tokenStyle: s.tokenStyle,
       ready: s.ready,
       connected: s.connected,
+      disconnectedAt: s.disconnectedAt ?? null,
       isHost: s.token === room.hostToken,
     })),
   };
@@ -149,9 +183,30 @@ function publicRoom(room) {
 
 const broadcast = (room) => io.to(room.code).emit("room:state", publicRoom(room));
 
+/**
+ * Append a history entry and stream it to the room. The buffer is what a
+ * reconnecting player replays, so it must stay small and JSON-safe.
+ * @param {Room} room
+ * @param {{type:string, text:string, playerId?:string, name?:string}} entry
+ */
+function logEvent(room, entry) {
+  const e = {
+    type: String(entry.type || "info"),
+    text: String(entry.text || "").slice(0, 160),
+    playerId: entry.playerId ?? null,
+    name: entry.name ?? null,
+    timestamp: Date.now(),
+  };
+  room.log.push(e);
+  while (room.log.length > LOG_MAX) room.log.shift();
+  io.to(room.code).emit("room:event", e);
+  return e;
+}
+
 /** Tear a room down and tell any connected clients so they never hang. */
 const closeRoom = (room, reason) => {
   io.to(room.code).emit("room:closed", { reason });
+  if (room.hostGrace) clearTimeout(room.hostGrace);
   rooms.delete(room.code);
 };
 
@@ -162,6 +217,68 @@ function seatBySocket(room, socketId) {
 function hostSocket(room) {
   const seat = room.seats.find((s) => s.token === room.hostToken);
   return seat ? seat.id : null;
+}
+
+const systemChat = (room, text) =>
+  io.to(room.code).emit("chat:message", { name: "Lobby", color: "#f4b73f", text, system: true });
+
+/* ---------- presence & host authority ---------- */
+
+/**
+ * Hand authority to the next connected seat (lowest seat index wins, which is
+ * the oldest seat in the room). Only the promoted client is told to spin up an
+ * engine; everyone else learns the new hostId from the room snapshot.
+ * @returns {boolean} whether authority actually moved
+ */
+function migrateHost(room, reason) {
+  if (room.hostGrace) { clearTimeout(room.hostGrace); room.hostGrace = null; }
+  const next = room.seats.find((s) => s.connected);
+  if (!next || next.token === room.hostToken) return false;
+  const prev = room.seats.find((s) => s.token === room.hostToken);
+  room.hostToken = next.token;
+  systemChat(room, `${next.name} is now the host`);
+  logEvent(room, {
+    type: "host_migrated",
+    playerId: next.token,
+    name: next.name,
+    text: `${next.name} took over as host` + (prev ? ` from ${prev.name}` : "") +
+      (reason ? ` (${reason})` : ""),
+  });
+  io.to(next.id).emit("host:migrated", { hostId: next.token, state: room.state });
+  broadcast(room);
+  return true;
+}
+
+/** Arm the 15s grace window before authority moves off an offline host. */
+function scheduleHostMigration(room) {
+  if (room.hostGrace) return;
+  room.hostGrace = setTimeout(() => {
+    room.hostGrace = null;
+    if (!rooms.has(room.code)) return;
+    const host = room.seats.find((s) => s.token === room.hostToken);
+    if (host && host.connected) return; // returned inside the grace window
+    migrateHost(room, "host offline 15s");
+  }, HOST_GRACE_MS);
+}
+
+/** Flag a seat as dropped without ever removing it from the match. */
+function markOffline(room, seat) {
+  if (!seat.connected) return;
+  seat.connected = false;
+  seat.disconnectedAt = Date.now();
+  systemChat(room, `${seat.name} disconnected`);
+  logEvent(room, {
+    type: "player_disconnected",
+    playerId: seat.token,
+    name: seat.name,
+    text: `${seat.name} disconnected`,
+  });
+  if (!room.seats.some((s) => s.connected)) { closeRoom(room, "everyone-left"); return; }
+  if (room.hostToken === seat.token) {
+    if (room.status === "lobby") migrateHost(room, "host left the lobby");
+    else scheduleHostMigration(room);
+  }
+  broadcast(room);
 }
 
 /* ---------- static file serving (single-port deploy) ---------- */
@@ -201,9 +318,6 @@ io.on("connection", (socket) => {
 
   const room = () => rooms.get(currentCode ?? "");
 
-  const systemChat = (r, text) =>
-    io.to(r.code).emit("chat:message", { name: "Lobby", color: "#f4b73f", text, system: true });
-
   const leaveRoom = () => {
     const r = room();
     currentCode = null;
@@ -216,26 +330,14 @@ io.on("connection", (socket) => {
       r.seats.splice(idx, 1);
       systemChat(r, `${seat.name} left the lobby`);
       if (r.seats.length === 0) { closeRoom(r, "empty"); return; }
-      if (r.hostToken === seat.token) migrateHost(r);
+      if (r.hostToken === seat.token) migrateHost(r, "host left the lobby");
       broadcast(r);
       return;
     }
 
-    // in-progress: keep the seat, mark offline
-    seat.connected = false;
-    systemChat(r, `${seat.name} disconnected`);
-    if (!r.seats.some((s) => s.connected)) { closeRoom(r, "everyone-left"); return; }
-    if (r.hostToken === seat.token) migrateHost(r);
-    broadcast(r);
+    // mid-match: the seat stays at the table, just goes dark
+    markOffline(r, seat);
   };
-
-  function migrateHost(r) {
-    const next = r.seats.find((s) => s.connected);
-    if (!next) return;
-    r.hostToken = next.token;
-    systemChat(r, `${next.name} is now the host`);
-    io.to(next.id).emit("host:migrated", { hostId: next.token, state: r.state });
-  }
 
   /* ----- lobby ----- */
 
@@ -247,11 +349,16 @@ io.on("connection", (socket) => {
     const r = {
       code: newCode(),
       hostToken: token,
-      seats: [{ id: socket.id, token, ...profile, ready: true, connected: true }],
+      seats: [{
+        id: socket.id, token, ...profile, ready: true, connected: true,
+        lastPing: Date.now(), pings: 0, disconnectedAt: null,
+      }],
       status: "lobby",
       settings: sanitizeSettings(rawSettings),
       state: null,
       turnDeadline: null,
+      log: [],
+      hostGrace: null,
     };
     rooms.set(r.code, r);
     currentCode = r.code;
@@ -274,7 +381,10 @@ io.on("connection", (socket) => {
     const profile = sanitizeProfile(rawProfile);
     profile.color = firstFreeColor(r.seats);
     const token = crypto.randomUUID();
-    r.seats.push({ id: socket.id, token, ...profile, ready: false, connected: true });
+    r.seats.push({
+      id: socket.id, token, ...profile, ready: false, connected: true,
+      lastPing: Date.now(), pings: 0, disconnectedAt: null,
+    });
     currentCode = r.code;
     void socket.join(r.code);
     systemChat(r, `${profile.name} joined the lobby`);
@@ -282,10 +392,13 @@ io.on("connection", (socket) => {
     broadcast(r);
   });
 
-  socket.on('room:rejoin', (codeRaw, tokenRaw, cb) => {
+  socket.on('room:rejoin', (codeRaw, tokenRaw, optsRaw, cb) => {
+    // older clients called (code, token, cb) — keep that signature working
+    if (typeof optsRaw === "function") { cb = optsRaw; optsRaw = null; }
     slog(socket, "room:rejoin");
     const code = String(codeRaw ?? "").trim().toUpperCase();
     const token = String(tokenRaw ?? "");
+    const resumeHost = Boolean(optsRaw && optsRaw.resumeHost);
     const r = rooms.get(code);
     const seat = r?.seats.find((s) => s.token === token);
     if (!r || !seat) return void cb?.({ ok: false, error: "Session expired." });
@@ -293,29 +406,71 @@ io.on("connection", (socket) => {
       // the seat is alive on another socket (second tab / device) — never hijack
       return void cb?.({ ok: false, error: "This player is already connected." });
     }
+
+    const wasOffline = !seat.connected;
     seat.id = socket.id;
     seat.connected = true;
+    seat.disconnectedAt = null;
+    seat.lastPing = Date.now();
     currentCode = r.code;
     void socket.join(r.code);
-    systemChat(r, `${seat.name} reconnected`);
+    if (wasOffline) {
+      systemChat(r, `${seat.name} reconnected`);
+      logEvent(r, {
+        type: "player_reconnected",
+        playerId: seat.token,
+        name: seat.name,
+        text: `${seat.name} reconnected`,
+      });
+    }
 
     if (r.status !== "lobby" && r.hostToken === seat.token) {
-      // the reload wiped the host's live engine — hand authority to another
-      // connected seat; the returning player continues as a guest
-      const next = r.seats.find((s) => s.connected && s.token !== seat.token);
-      if (next) {
-        r.hostToken = next.token;
-        systemChat(r, `${next.name} is now the host`);
-        io.to(next.id).emit("host:migrated", { hostId: next.token, state: r.state });
+      if (resumeHost) {
+        // transport-level reconnect: the host's engine never died, so cancel
+        // the pending migration and let them carry on driving the match
+        if (r.hostGrace) { clearTimeout(r.hostGrace); r.hostGrace = null; }
+      } else {
+        // a page reload wiped the live engine — hand authority to another
+        // connected seat; the returning player continues as a guest
+        migrateHost(r, "host reloaded");
       }
     }
-    cb?.({ ok: true, isHost: r.hostToken === token });
+
+    cb?.({ ok: true, isHost: r.hostToken === seat.token });
     broadcast(r);
+    socket.emit("room:history", r.log);
     if (r.status !== "lobby") {
-      // mid-match rejoin: rebuild the client view from the stored snapshot
+      // mid-match rejoin: rebuild the client view from the stored snapshot,
+      // including whatever is left of the current turn timer
       socket.emit("game:started", publicRoom(r).players, r.settings);
       if (r.state) socket.emit("host:state", r.state);
+      socket.emit("host:event", {
+        kind: "turn",
+        deadline: r.turnDeadline && r.turnDeadline > Date.now() ? r.turnDeadline : null,
+        currentId: null,
+      });
     }
+  });
+
+  /* ----- heartbeat: 5s from every client, sweeper drops silent seats ----- */
+
+  socket.on("net:ping", (cb) => {
+    const r = room();
+    const seat = r ? seatBySocket(r, socket.id) : null;
+    if (seat) {
+      seat.lastPing = Date.now();
+      seat.pings = (seat.pings || 0) + 1;
+    }
+    if (typeof cb === "function") cb({ t: Date.now() });
+  });
+
+  /* ----- host-reported match history (purchases, trades, skips) ----- */
+
+  socket.on("room:log", (entry) => {
+    const r = room();
+    if (!r || seatBySocket(r, socket.id)?.token !== r.hostToken) return;
+    if (!entry || !HOST_LOG_TYPES.has(String(entry.type))) return;
+    logEvent(r, { type: entry.type, text: entry.text, playerId: entry.playerId, name: entry.name });
   });
 
   socket.on('lobby:ready', (ready) => {
@@ -374,6 +529,8 @@ io.on("connection", (socket) => {
     if (seatBySocket(r, socket.id)?.token !== r.hostToken) return;
     if (r.seats.length < 2 || !r.seats.every((s) => s.ready)) return;
     r.status = "playing";
+    r.log.length = 0; // the lobby chatter is not match history
+    logEvent(r, { type: "match_started", text: `Match started with ${r.seats.length} players` });
     io.to(r.code).emit("game:started", publicRoom(r).players, r.settings);
     broadcast(r);
   });
@@ -393,7 +550,7 @@ io.on("connection", (socket) => {
     const r = room();
     if (!r || seatBySocket(r, socket.id)?.token !== r.hostToken) return;
     if (!event || typeof event.kind !== "string") return;
-    if (event.kind === "turn" && event.deadline) r.turnDeadline = Number(event.deadline);
+    if (event.kind === "turn") r.turnDeadline = event.deadline ? Number(event.deadline) : null;
     if (event.kind === "game-over") r.status = "finished";
     if (event.kind !== "log") slog(socket, `host:event ${event.kind}`);
     socket.to(r.code).emit("host:event", event);
@@ -417,8 +574,19 @@ io.on("connection", (socket) => {
     if (!r || r.status !== "playing") return;
     const from = seatBySocket(r, socket.id);
     const target = r.seats.find((s) => s.token === trade?.to);
-    if (!from || !target || from.token === target.token || !target.connected) return;
+    if (!from || !target || from.token === target.token) return;
+    if (!target.connected) {
+      // never leave the sender waiting on somebody who is not there
+      socket.emit("error", `${target.name} is disconnected — offer not delivered.`);
+      return;
+    }
     io.to(target.id).emit("trade:offer", trade, from.token);
+    logEvent(r, {
+      type: "trade_offer",
+      playerId: from.token,
+      name: from.name,
+      text: `${from.name} sent ${target.name} a trade offer`,
+    });
   });
 
   socket.on("trade:respond", (payload) => {
@@ -444,6 +612,26 @@ io.on("connection", (socket) => {
   socket.on("room:leave", leaveRoom);
   socket.on("disconnect", leaveRoom);
 });
+
+/* ---------- heartbeat sweeper ----------
+ * Socket "disconnect" covers clean drops; this catches half-open sockets that
+ * still look connected to the OS but stopped talking. A seat that has never
+ * pinged (older client build) is only judged by its socket, never by silence. */
+
+setInterval(() => {
+  const now = Date.now();
+  for (const r of [...rooms.values()]) {
+    for (const seat of [...r.seats]) {
+      if (!seat.connected) continue;
+      const socketAlive = io.sockets.sockets.has(seat.id);
+      const silent = (seat.pings || 0) > 0 && now - (seat.lastPing || 0) > PING_TIMEOUT_MS;
+      if (!socketAlive || silent) {
+        slog({ id: seat.id }, `sweeper: ${seat.name} ${socketAlive ? "went silent" : "socket gone"}`);
+        markOffline(r, seat);
+      }
+    }
+  }
+}, SWEEP_MS);
 
 httpServer.listen(PORT, () => {
   console.log(`Balkan Tycoon multiplayer on http://localhost:${PORT}`);

@@ -34,6 +34,17 @@
   const FORCED_TUMBLE_MS = 950; // free-physics tumble before guided landing
   const FORCED_LAND_MS = 420;   // guided slerp onto the predetermined faces
 
+  /* --- physics feel (tuned so the dice read as solid acrylic cubes) ---
+   * friction 0.3    : they grip the felt and stop rolling instead of skating
+   * restitution 0.5 : two lively bounces, then settle — no ping-pong
+   * mass 4          : heavy enough that die-vs-die hits transfer real impulse
+   * damping         : low enough to keep tumbling, high enough to kill drift */
+  const DICE_FRICTION = 0.3;
+  const DICE_RESTITUTION = 0.5;
+  const DICE_MASS = 4;
+  const LINEAR_DAMPING = 0.28;
+  const ANGULAR_DAMPING = 0.34;
+
   /* Face values per local axis (BoxGeometry material order px,nx,py,ny,pz,nz).
    * Opposite faces always sum to 7. */
   const FACE_VALUES = { px: 1, nx: 6, py: 2, ny: 5, pz: 3, nz: 4 };
@@ -139,6 +150,12 @@
 
   /* ---------- DiceManager ---------- */
 
+  /** Fire a dice sound if the audio engine is loaded and unmuted. */
+  function sound(name) {
+    const s = window.BT && window.BT.sfx;
+    if (s && typeof s[name] === "function") s[name]();
+  }
+
   class DiceManager {
     /**
      * @param {HTMLCanvasElement} canvas overlay canvas in the board centre
@@ -151,6 +168,7 @@
       this._rollStartedAt = 0;
       this._onComplete = null;
       this._done = false;   // single-fire guard for the result callback
+      this._clattered = true; // no clatter until the first real throw
       this._cockedAt = 0;   // anti-tilt grace window start
       this._snap = null;    // active slerp-to-flat fallback
       this._forced = null;  // predetermined faces (network rolls)
@@ -214,13 +232,14 @@
 
       this.matDice = new CANNON.Material("dice");
       this.matGround = new CANNON.Material("ground");
-      // grippier + bouncier: dice tumble dynamically and ricochet off each
-      // other and the walls instead of sliding to a dead stop
+      // Weighty feel: real friction so dice bite the felt and stop rolling
+      // instead of skating, and a moderate restitution so they bounce twice
+      // and settle rather than pinballing off the walls like ping-pong balls.
       world.addContactMaterial(new CANNON.ContactMaterial(this.matDice, this.matGround, {
-        friction: 0.25, restitution: 0.65,
+        friction: DICE_FRICTION, restitution: DICE_RESTITUTION,
       }));
       world.addContactMaterial(new CANNON.ContactMaterial(this.matDice, this.matDice, {
-        friction: 0.25, restitution: 0.65,
+        friction: DICE_FRICTION, restitution: DICE_RESTITUTION,
       }));
 
       // ground plane
@@ -270,14 +289,23 @@
         // rounded corners can never act as sharp physical balance points.
         const physHalf = half * 0.94;
         const body = new CANNON.Body({
-          mass: 1,
+          mass: DICE_MASS,
           material: this.matDice,
           shape: new CANNON.Box(new CANNON.Vec3(physHalf, physHalf, physHalf)),
-          linearDamping: 0.4, // kills perpetual sliding / micro-drift
-          angularDamping: 0.5, // kills endless micro-wobble on edges
+          linearDamping: LINEAR_DAMPING,  // kills perpetual sliding / micro-drift
+          angularDamping: ANGULAR_DAMPING, // kills endless micro-wobble on edges
         });
         body.position.set(mesh.position.x, physHalf, mesh.position.z);
         body.allowSleep = false;
+        // First real impact of a throw drives the clatter, so the sound lands
+        // on the frame the dice actually hit the felt instead of a guessed delay.
+        body.addEventListener("collide", (e) => {
+          if (!this.rolling || this._clattered) return;
+          const impact = e && e.contact && typeof e.contact.getImpactVelocityAlongNormal === "function"
+            ? Math.abs(e.contact.getImpactVelocityAlongNormal())
+            : 99;
+          if (impact > 2.2) this._clatter();
+        });
         world.add(body);
 
         this.dice.push({ mesh, body });
@@ -331,12 +359,16 @@
         return;
       }
 
+      this._clattered = false;
+      sound("diceShake"); // rattle in the hand while the throw winds up
+
       if (!this.available) {
         // graceful 2D fallback if WebGL libs failed to load
         const d1 = this._forced ? this._forced[0] : 1 + Math.floor(Math.random() * 6);
         const d2 = this._forced ? this._forced[1] : 1 + Math.floor(Math.random() * 6);
         setTimeout(() => {
           this.rolling = false;
+          this._clatter();
           if (this._onComplete) this._onComplete(d1, d2, d1 + d2);
         }, 700);
         return;
@@ -379,9 +411,17 @@
       return yaw.multiply(fix);
     }
 
+    /** Dice hitting the table — fired exactly once per throw. */
+    _clatter() {
+      if (this._clattered) return;
+      this._clattered = true;
+      sound("diceLand");
+    }
+
     /** Guided landing for predetermined rolls: tween every die from its
      * current pose onto the exact target face while easing down to rest. */
     _beginForcedLanding() {
+      this._clatter(); // the tumble is over — clack as they come to rest
       const half = DIE_SIZE / 2;
       const targets = this.dice.map((d, i) => ({
         from: d.mesh.quaternion.clone(),
@@ -489,6 +529,7 @@
     _finishRoll() {
       if (this._done) return; // never fire the turn callback twice
       this._done = true;
+      this._clatter();
       // Predetermined rolls always report the network values — the physics
       // tumble is pure eye-candy and must never override them.
       const d1 = this._forced ? this._forced[0] : this._topValue(this.dice[0].body);

@@ -29,6 +29,8 @@
     },
   };
 
+  const wait = (ms) => new Promise((res) => setTimeout(res, ms));
+
   const shuffle = (arr) => {
     const a = [...arr];
     for (let i = a.length - 1; i > 0; i--) {
@@ -49,6 +51,12 @@
      *   movePawn(player, fromPos, steps, {onPassGo}) -> Promise<finalPos>
      *   teleportPawn(player, pos)
      *   promptBuy(player, tile, price) -> Promise<boolean>
+     *   boughtProperty(player, tile)          purchase confirmed (fx + sfx)
+     *   builtOn(player, tile, level)          house/hotel raised (fx + sfx)
+     *   soldOn(player, tile)                  house sold back
+     *   paidRent(payer, owner, amount, tile)  rent about to change hands
+     *   paidTax(player, amount, tile)         tax/fine to the bank
+     *   bankrupted(player, creditor|null)     knocked out
      *   showCard(cardView) -> Promise<choiceId|void>
      *   jailChoice(player) -> Promise<"roll"|"pay"|"card">
      *   auctionStep(ctx) -> Promise<{bid:number}|{pass:true}>
@@ -192,6 +200,7 @@
     _bankrupt(p, creditor) {
       p.bankrupt = true;
       this._log("💀", "#ef4444", `${p.name} is bankrupt!`);
+      if (this.hooks.bankrupted) this.hooks.bankrupted(p, creditor || null);
       for (const t of TILES) {
         const ps = this.props[t.id];
         if (ps && ps.owner === p.id) {
@@ -235,6 +244,9 @@
       this.doublesCount = 0;
       p.position = JAIL_POS;
       this.hooks.teleportPawn(p, JAIL_POS);
+      // move the pawn into the cell (and slam the door) rather than leaving it
+      // standing in the visiting yard
+      if (this.hooks.setJailed) this.hooks.setJailed(p, true);
       this._log("🚨", "#ef4444", `${p.name} was sent to prison`);
     }
 
@@ -252,6 +264,8 @@
           if (!ps.owner) {
             if (p.cash >= tile.price) {
               this._changed();
+              // movement is already parked here: the pawn stops on the tile and
+              // nothing advances until this prompt resolves
               const wants = await this.hooks.promptBuy(p, tile, tile.price);
               if (wants) {
                 this._buy(p, tile);
@@ -259,7 +273,8 @@
                 this._log("ban", "#f59e0b", `${p.name} passed — ${tile.name} goes to auction`);
                 await this._runAuction(p, tile);
               } else {
-                this._log("ban", "#f59e0b", `${p.name} passed on ${tile.name}`);
+                this._log("ban", "#f59e0b", `${p.name} skipped ${tile.name}`);
+                await wait(500); // brief beat before play resumes
               }
             } else {
               this._log("😅", "#f59e0b", `${p.name} can't afford ${tile.name} (${fmt(tile.price)})`);
@@ -271,6 +286,7 @@
             if (!owner.bankrupt) {
               const rent = this.rentFor(tile);
               this._log("💰", "#ef4444", `${p.name} paid ${owner.name} ${fmt(rent)} rent for ${tile.name}`);
+              if (this.hooks.paidRent) this.hooks.paidRent(p, owner, rent, tile);
               this._pay(p, rent, owner);
             }
           }
@@ -278,6 +294,7 @@
         }
         case "tax":
           this._log(tile.icon, "#ef4444", `${p.name} paid ${fmt(tile.amount)} at the ${tile.name}`);
+          if (this.hooks.paidTax) this.hooks.paidTax(p, tile.amount, tile);
           this._pay(p, tile.amount, null);
           break;
         case "surprise":
@@ -399,6 +416,7 @@
       this.props[tile.id].owner = p.id;
       this.props[tile.id].houses = 0;
       this._log("🏙️", "#3b82f6", `${p.name} bought ${tile.name} for ${fmt(tile.price)}`);
+      if (this.hooks.boughtProperty) this.hooks.boughtProperty(p, tile);
       if (tile.kind === "city" && this.ownsGroup(p, tile.country)) {
         this._log("👑", "#f4b73f", `${p.name} now owns all of ${COUNTRIES[tile.country].name}!`);
       }
@@ -414,6 +432,7 @@
       const n = this.props[tile.id].houses;
       this._log(n >= 4 ? "🏨" : "🏠", "#22c55e",
         `${p.name} built ${n >= 4 ? "a HOTEL" : `house #${n}`} on ${tile.name}`);
+      if (this.hooks.builtOn) this.hooks.builtOn(p, tile, n);
       this._changed();
       return true;
     }
@@ -424,6 +443,7 @@
       this.props[tile.id].houses -= 1;
       p.cash += Math.round(tile.houseCost * ECONOMY.sellRate);
       this._log("📉", "#f59e0b", `${p.name} sold a house on ${tile.name}`);
+      if (this.hooks.soldOn) this.hooks.soldOn(p, tile);
       this._changed();
       return true;
     }

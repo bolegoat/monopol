@@ -58,6 +58,15 @@
     minus: '<path d="M5.5 12h13"/>',
     chevronDown: '<path d="m6.5 9.5 5.5 5.5 5.5-5.5"/>',
     cog: '<circle cx="12" cy="12" r="3"/><path d="M12 3.2v2.3m0 13v2.3M4.8 4.8l1.6 1.6m11.2 11.2 1.6 1.6M3.2 12h2.3m13 0h2.3M4.8 19.2l1.6-1.6M17.6 6.4l1.6-1.6"/>',
+    /* audio + presence */
+    volume: '<path d="M4 9.5h3l4.5-3.8v12.6L7 14.5H4z"/><path d="M15.2 9.2a4 4 0 0 1 0 5.6"/><path d="M17.8 6.6a7.6 7.6 0 0 1 0 10.8"/>',
+    volumeMute: '<path d="M4 9.5h3l4.5-3.8v12.6L7 14.5H4z"/><path d="m15.5 9.8 5 4.4m0-4.4-5 4.4"/>',
+    music: '<circle cx="7" cy="17.5" r="2.8"/><circle cx="17.5" cy="15.5" r="2.8"/><path d="M9.8 17.5V6.2l10.5-2.1v11.4"/>',
+    plug: '<path d="M9 3.5v5m6-5v5"/><path d="M6.5 8.5h11v2.8a5.5 5.5 0 0 1-11 0z"/><path d="M12 16.8v3.7"/>',
+    history: '<path d="M3.6 12a8.4 8.4 0 1 0 2.6-6"/><path d="M3.4 3.6v3h3"/><path d="M12 8v4.3l3 1.8"/>',
+    sliders: '<path d="M5 6.5h14M5 12h14M5 17.5h14"/><circle cx="9.5" cy="6.5" r="2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="8" cy="17.5" r="2" fill="currentColor" stroke="none"/>',
+    coins: '<ellipse cx="12" cy="6.6" rx="6.6" ry="2.9"/><path d="M5.4 6.6v4.2c0 1.6 3 2.9 6.6 2.9s6.6-1.3 6.6-2.9V6.6"/><path d="M5.4 10.8V15c0 1.6 3 2.9 6.6 2.9s6.6-1.3 6.6-2.9v-4.2"/>',
+    wifiOff: '<path d="m2.5 2.5 19 19"/><path d="M8.4 15.6a5 5 0 0 1 6-.8"/><path d="M5.2 12.1a9.6 9.6 0 0 1 4.1-2.3"/><path d="M2 8.6a14 14 0 0 1 6-3.2"/><path d="M14.3 5.6A14 14 0 0 1 22 8.6"/><path d="M14.9 9.9a9.6 9.6 0 0 1 3.9 2.2"/><circle cx="12" cy="19.2" r=".8" fill="currentColor" stroke="none"/>',
   };
 
   /** Render an icon by name. */
@@ -82,6 +91,8 @@
     "🤝": "exchange", "🚫": "ban", "⏱️": "clock", "⏱": "clock", "🏨": "building",
     "📉": "repeat", "🎉": "sparkles", "✅": "check", "⚠️": "alert", "⚠": "alert",
     "💬": "mail", "🥃": "bottle", "🎡": "sparkles", "❓": "help", "🧿": "eye",
+    "🔌": "plug", "📬": "mail", "🔊": "volume", "🔇": "volumeMute", "🎵": "music",
+    "🏗️": "building", "🏗": "building", "💸": "coins", "📡": "wifiOff",
   };
 
   /** Emoji (or name) → SVG, falling back to a neutral dot. */

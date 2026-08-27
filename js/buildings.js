@@ -197,14 +197,25 @@
     return out;
   }
 
-  function buildFor(count) {
+  /**
+   * @param {number} count house level (4 = hotel)
+   * @param {number} faceYaw local yaw applied to each piece. The group itself
+   *   is yawed so the row of houses runs along the tile's inner edge; this
+   *   counter-yaw keeps every model's facade pointed at the camera, so a hotel
+   *   on the left/right columns reads as a building instead of a thin sliver.
+   */
+  function buildFor(count, faceYaw) {
     const group = new THREE.Group();
+    const yaw = faceYaw || 0;
     if (count >= 4) {
-      group.add(makeHotel());
+      const hotel = makeHotel();
+      hotel.rotation.y = yaw;
+      group.add(hotel);
     } else {
       for (const dx of layoutFor(count)) {
         const house = makeHouse();
         house.position.x = dx;
+        house.rotation.y = yaw;
         group.add(house);
       }
     }
@@ -226,6 +237,10 @@
    * banner zone. Height shifts visuals up-screen (natural drop parallax). */
 
   const SIDE_YAW = { bottom: Math.PI, top: 0, left: Math.PI / 2, right: -Math.PI / 2 };
+
+  /* Every facade ends up pointing this way in world space — straight at the
+   * tilted camera, which is what the bottom row already did. */
+  const VIEW_YAW = Math.PI;
 
   function anchorFor(index) {
     const UI = window.BT.UI;
@@ -465,9 +480,11 @@
         continue;
       }
 
-      const group = buildFor(want);
+      // group yaw lines the row up with the tile edge; the per-piece counter-yaw
+      // (VIEW_YAW - anchor.yaw) turns every facade back toward the camera
+      const group = buildFor(want, VIEW_YAW - anchor.yaw);
       group.position.set(anchor.x, 0, anchor.z);
-      group.rotation.y = anchor.yaw; // fronts face the board center
+      group.rotation.y = anchor.yaw;
       scene.add(group);
       placed.set(tileId, { group, count: want });
 
@@ -481,5 +498,25 @@
     if (scene) rebuildAll();
   }
 
-  window.BT = Object.assign(window.BT || {}, { Buildings: { sync, reset } });
+  /** True once the WebGL overlay is live, i.e. 3D pieces replace the 2D pips. */
+  function active() {
+    return Boolean(renderer && scene);
+  }
+
+  /** Diagnostics: what is placed where (console / test use only). */
+  function debug() {
+    const out = [];
+    for (const [tileId, rec] of placed) {
+      out.push({
+        tileId,
+        count: rec.count,
+        placed: Boolean(rec.group),
+        pos: rec.group ? [Math.round(rec.group.position.x), Math.round(rec.group.position.z)] : null,
+        inScene: rec.group ? Boolean(rec.group.parent) : false,
+      });
+    }
+    return { tilePx, sinE: SIN_E, entries: out };
+  }
+
+  window.BT = Object.assign(window.BT || {}, { Buildings: { sync, reset, active, debug } });
 })();

@@ -12,13 +12,48 @@
  *   - Trading: offer, relay to target, accept / decline / counter; the host
  *     validates and applies atomically, then broadcasts the new state.
  *   - Host migration: the relay promotes the next connected seat; the new
- *     host rebuilds the engine from the latest snapshot and carries on.
+ *     host rebuilds the engine from the latest snapshot and carries on. A
+ *     demoted host tears its engine down and follows the new one.
+ *
+ * Absent players never block the match:
+ *   - A dropped seat keeps its chair but is auto-played after AUTO_SKIP_MS,
+ *     and any prompt the host is waiting on from them resolves instantly
+ *     with a safe default (skip the buy, decline the trade, roll in jail).
+ *   - Presence drives the greyed-out avatars, badges and reconnect sounds.
+ *   - The relay's history buffer is replayed into the session-log panel so a
+ *     returning player can read exactly what they missed.
  * ========================================================================== */
 
 "use strict";
 
 (function () {
   const { Game, UI } = window.BT;
+
+  /** A disconnected player's turn is auto-played after this long. */
+  const AUTO_SKIP_MS = 10_000;
+
+  /* history entry type -> [icon key, color] for the session-log panel */
+  const SESSION_STYLE = {
+    player_disconnected: ["wifiOff", "#f59e0b"],
+    player_reconnected: ["plug", "#22c55e"],
+    host_migrated: ["crown", "#f4b73f"],
+    property_bought: ["building", "#3b82f6"],
+    property_auctioned: ["banknote", "#f4b73f"],
+    house_built: ["house", "#22c55e"],
+    trade_offer: ["mail", "#c084fc"],
+    trade_accepted: ["exchange", "#22c55e"],
+    trade_declined: ["ban", "#ef4444"],
+    turn_skipped: ["clock", "#f59e0b"],
+    player_bankrupt: ["skull", "#ef4444"],
+    match_started: ["flag", "#f4b73f"],
+    match_over: ["crown", "#f4b73f"],
+  };
+
+  /** Relay history entry -> session-log row. */
+  function sessionEntry(e) {
+    const [icon, color] = SESSION_STYLE[e && e.type] || ["clock", "#8b98a8"];
+    return { icon, color, text: (e && e.text) || "", timestamp: e && e.timestamp };
+  }
 
   /* Fallback seat palette (lobby normally assigns from PLAYER_COLORS). */
   const SEAT_PRESETS = [
@@ -37,17 +72,23 @@
       this.pawnLayer = deps.pawnLayer;
 
       this.isHost = false;
+      this.hostId = null;
       this.roster = [];
       this.settings = null; // match configuration from the lobby
       this.game = null;
       this.myId = null;
       this.started = false;
-      this.pendingPrompts = new Map();
+      this.pendingPrompts = new Map(); // promptId -> { resolve, playerId, fallback }
       this._promptSeq = 0;
       this._turnTimeout = null;
       this._turnDeadline = null;
       this._timerInterval = null;
       this._animating = new Set();
+      this.presence = new Map(); // playerId -> connected
+      this._skipTimer = null;
+
+      // the relay must know whether our engine survived a transport blip
+      this.net.isHostResumable = () => this.isHost && this.started;
 
       this._wireNet();
     }
@@ -66,12 +107,45 @@
 
       net.on("room:state", (room) => {
         this.roster = room.players;
+        this.hostId = room.hostId;
         const amHost = room.hostId === this.myId;
-        if (amHost !== this.isHost && this.started) return;
-        this.isHost = amHost;
-        if (!this.started) {
-          window.BT.Lobby.onRoomState(room, this.myId);
+
+        if (this.started) {
+          // authority moved while we were playing: stand down and follow
+          if (this.isHost && !amHost) this._demote();
+          // a rejoining guest gets whatever is left of the live turn timer
+          if (!this.isHost) {
+            const dl = Number(room.turnDeadline);
+            this._turnDeadline = dl && dl > Date.now() ? dl : this._turnDeadline;
+            this._renderTimerFromSnapshot();
+          }
+          this._syncPresence(room.players);
+          return;
         }
+
+        this.isHost = amHost;
+        this._syncPresence(room.players);
+        window.BT.Lobby.onRoomState(room, this.myId);
+      });
+
+      /* ----- session history (replayed on rejoin) ----- */
+
+      net.on("room:event", (entry) => UI.pushSessionEvent(sessionEntry(entry)));
+      net.on("room:history", (entries) => {
+        UI.setSessionLog((entries || []).map(sessionEntry));
+        if (entries && entries.length) UI.showSessionLog(true);
+      });
+
+      /* ----- transport blips ----- */
+
+      net.on("net:offline", () => {
+        UI.setConnState(false);
+        UI.log("wifiOff", "#f59e0b", "Connection lost \u2014 reconnecting\u2026");
+      });
+
+      net.on("net:resumed", () => {
+        UI.setConnState(true);
+        UI.log("plug", "#22c55e", "Reconnected \u2014 resyncing the table\u2026");
       });
 
       net.on("game:started", (players, settings) => {
@@ -97,46 +171,59 @@
       });
 
       net.on("trade:offer", (trade, fromId) => {
+        const full = { ...trade, from: fromId, to: this.myId };
+        if (!this.game || this.game.phase === "over") {
+          this.net.sendTradeResponse({ accept: false, trade: full });
+          return;
+        }
         const from = this._playerName(fromId);
         UI.incomingTrade(this.game, trade, from, {
-          onAccept: () => this.net.sendTradeResponse({ accept: true, trade: { ...trade, from: fromId, to: this.myId } }),
-          onDecline: () => this.net.sendTradeResponse({ accept: false, trade: { ...trade, from: fromId, to: this.myId } }),
+          onAccept: () => this.net.sendTradeResponse({ accept: true, trade: full }),
+          onDecline: () => this.net.sendTradeResponse({ accept: false, trade: full }),
           onCounter: () => this.openTradeComposer(fromId, {
             giveCash: trade.wantCash, giveTiles: trade.wantTiles,
             wantCash: trade.giveCash, wantTiles: trade.giveTiles,
           }),
-        });
+        }, { fromId });
       });
 
       net.on("trade:respond", (payload, fromId) => {
         if (!this.isHost || !this.game) return;
         const trade = payload && payload.trade;
         if (!trade) return;
+        const target = this._playerName(fromId);
+        const sender = this._playerName(trade.from);
         if (payload.accept && trade.to === fromId) {
           const ok = this.game.applyTrade(trade);
           if (ok) {
             window.BT.sfx.deal();
             this.net.sendEvent({ kind: "deal" });
+            this._roomLog("trade_accepted", target + " accepted " + sender + "\u2019s trade", fromId, target);
           } else {
             this._hostLog("ban", "#ef4444", "Trade failed validation (state changed)");
           }
         } else if (!payload.accept) {
-          this._hostLog("ban", "#ef4444",
-            this._playerName(fromId) + " declined " + this._playerName(trade.from) + "\u2019s trade offer");
+          this._hostLog("ban", "#ef4444", target + " declined " + sender + "\u2019s trade offer");
+          this._roomLog("trade_declined", target + " declined " + sender + "\u2019s trade", fromId, target);
         }
         this._broadcastState();
       });
 
-      net.on("host:migrated", ({ state }) => {
+      net.on("host:migrated", ({ hostId, state }) => {
+        if (hostId && hostId !== this.myId) return; // only the promoted seat acts
         this.isHost = true;
-        UI.log("globe", "#f4b73f", "You are now the host — game continues.");
+        this.hostId = this.myId;
+        UI.log("crown", "#f4b73f", "You are now the host \u2014 the game continues.");
         if (this.started && state) {
           this.game = Game.fromSnapshot(state, this._hostHooks());
           window.BT.game = this.game;
+          UI.game = this.game;
+          // the previous host may have died mid-animation: land on a safe phase
           if (this.game.phase === "busy") this.game.phase = "turn-end";
           UI.sync(this.game);
           this._broadcastState();
           this._armTurnTimer();
+          this._armAutoSkip();
         }
       });
 
@@ -150,6 +237,13 @@
         this.game = null;
         this.isHost = false;
         this._clearTurnTimer();
+        clearTimeout(this._skipTimer);
+        this._skipTimer = null;
+        this.presence = new Map();
+        UI.setPresence(new Map());
+        UI.clearTrades();
+        UI.showSessionLog(false);
+        UI.setConnState(true);
         window.BT.myPlayerId = null;
         window.BT.mpActive = false;
         window.BT.Lobby.openHome();
@@ -160,11 +254,128 @@
       this.net.leave();
       window.BT.Lobby.openHome();
     }
+
+    /* ================= presence ================= */
+
+    /**
+     * Fold a roster snapshot into the presence map and react to the deltas:
+     * grey the seat out everywhere, play the drop/return sound, and make sure
+     * an absent player can never hold the table hostage.
+     */
+    _syncPresence(players) {
+      const next = new Map();
+      for (const p of players || []) next.set(p.id, p.connected !== false);
+
+      const first = this.presence.size === 0;
+      const changes = [];
+      for (const [id, on] of next) {
+        const was = this.presence.get(id);
+        if (!first && was !== undefined && was !== on) changes.push([id, on]);
+      }
+
+      this.presence = next;
+      UI.setPresence(next);
+      for (const [id, on] of next) this.pawnLayer.setPresence(id, on);
+
+      for (const [id, on] of changes) {
+        const name = this._playerName(id);
+        if (on) {
+          window.BT.sfx.online();
+          UI.log("plug", "#22c55e", name + " reconnected");
+        } else {
+          window.BT.sfx.offline();
+          UI.log("wifiOff", "#f59e0b", name + " disconnected \u2014 play continues without them");
+          UI.dismissTradesFrom(id); // their pending offers are dead letters
+        }
+        UI.pulsePlayer(id, on ? "online" : "offline");
+        if (!on) this._onSeatOffline(id);
+      }
+
+      // reconnects cancel a pending auto-skip, drops arm one
+      if (changes.length) this._armAutoSkip();
+    }
+
+    /** Host-side: unblock anything that was waiting on the seat that dropped. */
+    _onSeatOffline(playerId) {
+      if (!this.isHost || !this.game) return;
+      this._autoAnswerPrompts(playerId, "disconnected");
+    }
+
+    /** Resolve every pending remote prompt for `playerId` with its fallback. */
+    _autoAnswerPrompts(playerId, why) {
+      for (const [id, entry] of [...this.pendingPrompts]) {
+        if (entry.playerId !== playerId) continue;
+        this.pendingPrompts.delete(id);
+        this._hostLog("clock", "#f59e0b",
+          this._playerName(playerId) + " is " + why + " \u2014 auto-answering for them");
+        entry.resolve(entry.fallback);
+      }
+    }
+
+    /**
+     * Host-side watchdog: if the player on turn is offline, play their turn
+     * for them after AUTO_SKIP_MS instead of waiting out the full turn timer.
+     */
+    _armAutoSkip() {
+      clearTimeout(this._skipTimer);
+      this._skipTimer = null;
+      const g = this.game;
+      if (!this.isHost || !g || g.phase === "over") return;
+      const cur = g.current;
+      if (!cur || this.presence.get(cur.id) !== false) return; // present: nothing to do
+
+      this._skipTimer = setTimeout(() => {
+        this._skipTimer = null;
+        const game = this.game;
+        if (!this.isHost || !game || game.phase === "over") return;
+        const p = game.current;
+        if (!p || this.presence.get(p.id) !== false) return; // came back in time
+
+        this._hostLog("clock", "#f59e0b", p.name + " is offline \u2014 auto-playing their turn");
+        this._roomLog("turn_skipped", p.name + " was auto-played while disconnected", p.id, p.name);
+        this._autoAnswerPrompts(p.id, "disconnected");
+        if (game.phase === "awaiting-roll" || game.phase === "awaiting-jail-roll") game.roll();
+        else if (game.phase === "turn-end") void game.endTurn();
+        this._armAutoSkip(); // still their turn (doubles / busy)? keep pushing
+      }, AUTO_SKIP_MS);
+    }
+
+    /** Push a durable history entry (host only; replayed to rejoining players). */
+    _roomLog(type, text, playerId, name) {
+      if (!this.isHost) return;
+      this.net.sendRoomLog({ type, text, playerId: playerId || null, name: name || null });
+    }
+
+    /**
+     * Authority moved to somebody else: stop driving, rebuild the engine as a
+     * read-only view and follow the new host's snapshots from here on.
+     */
+    _demote() {
+      this.isHost = false;
+      this._clearTurnTimer();
+      clearTimeout(this._skipTimer);
+      this._skipTimer = null;
+      // anything we were waiting on is the new host's problem now
+      for (const [id, entry] of [...this.pendingPrompts]) {
+        this.pendingPrompts.delete(id);
+        entry.resolve(entry.fallback);
+      }
+      if (this.game) {
+        this.game = Game.fromSnapshot(this.game.serialize(), this._guestHooks());
+        window.BT.game = this.game;
+        UI.game = this.game;
+        UI.sync(this.game);
+      }
+      UI.log("globe", "#f4b73f", this._playerName(this.hostId) + " is hosting now \u2014 following their table.");
+    }
+
     /* ================= match lifecycle ================= */
 
     _beginMatch() {
       this.started = true;
       window.BT.Lobby.closeMenu();
+      UI.showSessionLog(true);
+      UI.setConnState(true);
 
       const defs = this.roster.map((seat, i) => ({
         id: seat.id,
@@ -190,9 +401,12 @@
       }
 
       window.BT.game = this.game;
+      UI.game = this.game;
       this.game.players.forEach((p, i) => this.pawnLayer.addPlayer(p, i));
+      this._syncPresence(this.roster);
       UI.sync(this.game);
       this._startClock();
+      this._armAutoSkip();
     }
 
     /* ================= host: engine hooks ================= */
@@ -209,6 +423,7 @@
           UI.refreshBuildIfOpen(self.game);
           self._broadcastState();
           self._armTurnTimer();
+          self._armAutoSkip();
         },
         rollDice(cb) {
           // Draw the result ONCE here, stream it to every client, then let
@@ -236,6 +451,7 @@
         },
         setJailed(player, jailed) {
           self.pawnLayer.setJailed(player.id, jailed);
+          if (jailed) window.BT.sfx.jail();
           self.net.sendEvent({ kind: "jailed", playerId: player.id, jailed });
         },
         promptBuy(player, tile, price) {
@@ -263,10 +479,49 @@
             { pass: true },
           );
         },
+        boughtProperty(player, tile) {
+          UI.muteNextCashSound(); // the purchase sound already covers the money
+          UI.celebratePurchase(tile.id, player);
+          self.net.sendEvent({ kind: "bought", playerId: player.id, tileId: tile.id });
+          self._roomLog("property_bought",
+            player.name + " bought " + tile.name + " for \u20ac" + tile.price, player.id, player.name);
+        },
+        builtOn(player, tile, level) {
+          UI.muteNextCashSound();
+          if (level >= 4) window.BT.sfx.hotel(); else window.BT.sfx.build();
+          self.net.sendEvent({ kind: "built", playerId: player.id, tileId: tile.id, level });
+          self._roomLog("house_built",
+            player.name + (level >= 4 ? " opened a hotel on " : " built house #" + level + " on ") + tile.name,
+            player.id, player.name);
+        },
+        soldOn(player, tile) {
+          UI.muteNextCashSound();
+          window.BT.sfx.sell();
+          self.net.sendEvent({ kind: "sold", playerId: player.id, tileId: tile.id });
+        },
+        paidRent(payer, owner, amount) {
+          UI.muteNextCashSound();
+          window.BT.sfx.rent(amount);
+          self.net.sendEvent({ kind: "money", how: "rent", playerId: payer.id, toId: owner.id, amount });
+        },
+        paidTax(player, amount) {
+          UI.muteNextCashSound();
+          window.BT.sfx.tax(amount);
+          self.net.sendEvent({ kind: "money", how: "tax", playerId: player.id, amount });
+        },
+        bankrupted(player) {
+          window.BT.sfx.bankrupt();
+          self.net.sendEvent({ kind: "bankrupt", playerId: player.id });
+          self._roomLog("player_bankrupt", player.name + " went bankrupt", player.id, player.name);
+        },
         gameOver(winner, reason) {
+          window.BT.sfx.win();
           UI.showGameOver(winner, reason);
           self.net.sendEvent({ kind: "game-over", winnerId: winner ? winner.id : null, reason });
+          self._roomLog("match_over", (winner ? winner.name : "Nobody") + " won \u2014 " + reason,
+            winner ? winner.id : null, winner ? winner.name : null);
           self._clearTurnTimer();
+          clearTimeout(self._skipTimer);
         },
       };
     }
@@ -279,22 +534,35 @@
         movePawn: async (_p, from) => from,
         teleportPawn: noop, removePawn: noop, setJailed: noop,
         promptBuy: async () => false, showCard: async () => {}, jailChoice: async () => "roll",
+        boughtProperty: noop, builtOn: noop, soldOn: noop, bankrupted: noop,
+        paidRent: noop, paidTax: noop,
         gameOver: noop,
       };
     }
 
     /* ================= host: remote prompts ================= */
 
+    /**
+     * Ask a remote player something (buy / card / jail / auction) and never
+     * hang on the answer: an offline seat is answered immediately with the
+     * safe default, and everyone else is time-boxed to the turn timer.
+     */
     _promptRemote(player, prompt, fallback) {
+      // already gone? do not even send it — resolve on the spot
+      if (this.presence.get(player.id) === false) {
+        this._hostLog("clock", "#f59e0b", player.name + " is offline \u2014 auto-answering for them");
+        return Promise.resolve(fallback);
+      }
       const id = "pr" + (++this._promptSeq);
       this.net.sendEvent({ kind: "prompt", to: player.id, prompt: { ...prompt, id } });
       return new Promise((resolve) => {
-        this.pendingPrompts.set(id, resolve);
+        this.pendingPrompts.set(id, { resolve, playerId: player.id, fallback });
         setTimeout(() => {
-          if (this.pendingPrompts.delete(id)) {
-            this._hostLog("clock", "#f59e0b", player.name + " took too long — auto-continuing");
-            resolve(fallback);
-          }
+          const entry = this.pendingPrompts.get(id);
+          if (!entry) return;
+          this.pendingPrompts.delete(id);
+          this._hostLog("clock", "#f59e0b", player.name + " took too long \u2014 auto-continuing");
+          entry.resolve(fallback);
         }, (this._turnSec() || 45) * 1000);
       });
     }
@@ -315,8 +583,11 @@
           if (fromId === g.current.id && g.phase === "turn-end") void g.endTurn();
           break;
         case "prompt-response": {
-          const resolve = this.pendingPrompts.get(action.id);
-          if (resolve) { this.pendingPrompts.delete(action.id); resolve(action.value); }
+          const entry = this.pendingPrompts.get(action.id);
+          if (entry && entry.playerId === fromId) {
+            this.pendingPrompts.delete(action.id);
+            entry.resolve(action.value);
+          }
           break;
         }
         case "build": {
@@ -351,8 +622,17 @@
     _armTurnTimer() {
       this._clearTurnTimer();
       const g = this.game;
-      if (!this.isHost || !g || g.phase === "over") return;
-      if (!["awaiting-roll", "awaiting-jail-roll", "turn-end"].includes(g.phase)) return;
+      if (!this.isHost || !g || g.phase === "over") {
+        this.net.sendEvent({ kind: "turn", deadline: null, currentId: null });
+        this._renderTimerFromSnapshot();
+        return;
+      }
+      if (!["awaiting-roll", "awaiting-jail-roll", "turn-end"].includes(g.phase)) {
+        // mid-animation / mid-prompt: no countdown to show rather than a dead 0
+        this.net.sendEvent({ kind: "turn", deadline: null, currentId: g.current.id });
+        this._renderTimerFromSnapshot();
+        return;
+      }
 
       const secs = this._turnSec();
       if (secs == null) { // unlimited
@@ -419,6 +699,7 @@
           break;
         case "jailed":
           this.pawnLayer.setJailed(event.playerId, event.jailed);
+          if (event.jailed) window.BT.sfx.jail();
           break;
         case "turn":
           this._turnDeadline = event.deadline || null;
@@ -426,6 +707,29 @@
           break;
         case "deal":
           window.BT.sfx.deal();
+          break;
+        case "bought": {
+          const buyer = g && g.player(event.playerId);
+          UI.muteNextCashSound();
+          UI.celebratePurchase(event.tileId, buyer || { id: event.playerId, color: "#f0b64a" });
+          break;
+        }
+        case "built":
+          UI.muteNextCashSound();
+          if (event.level >= 4) window.BT.sfx.hotel(); else window.BT.sfx.build();
+          break;
+        case "sold":
+          UI.muteNextCashSound();
+          window.BT.sfx.sell();
+          break;
+        case "money":
+          // the specific sound replaces the generic cash whoosh
+          UI.muteNextCashSound();
+          if (event.how === "rent") window.BT.sfx.rent(event.amount);
+          else if (event.how === "tax") window.BT.sfx.tax(event.amount);
+          break;
+        case "bankrupt":
+          window.BT.sfx.bankrupt();
           break;
         case "prompt":
           if (event.to === this.myId) this._answerPrompt(event.prompt);
@@ -527,7 +831,7 @@
     _renderTimerFromSnapshot() {
       if (!this._turnDeadline) { UI.setTurnTimer(null); return; }
       const left = Math.max(0, Math.round((this._turnDeadline - Date.now()) / 1000));
-      UI.setTurnTimer(left);
+      UI.setTurnTimer(left, this._turnSec() || 45);
     }
 
     _playerName(id) {

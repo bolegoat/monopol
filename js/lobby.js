@@ -171,9 +171,11 @@
         '<span class="stage-row__name">' + esc(p.name) +
         (p.id === state.myId ? ' <em>(you)</em>' : "") + "</span>" +
         (p.isHost ? '<span class="stage-badge host">' + icon("crown", "ic-sb") + "Host</span>" : "") +
-        (p.ready
-          ? '<span class="stage-badge ready">' + icon("check", "ic-sb") + "Ready</span>"
-          : '<span class="stage-badge waiting">' + icon("clock", "ic-sb") + "Waiting</span>");
+        (p.connected === false
+          ? '<span class="stage-badge offline">' + icon("alert", "ic-sb") + "Disconnected</span>"
+          : p.ready
+            ? '<span class="stage-badge ready">' + icon("check", "ic-sb") + "Ready</span>"
+            : '<span class="stage-badge waiting">' + icon("clock", "ic-sb") + "Waiting</span>");
       list.appendChild(li);
     }
     const cap = (room.settings && room.settings.maxPlayers) || state.settings.maxPlayers;
