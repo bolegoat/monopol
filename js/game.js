@@ -319,7 +319,15 @@
       const paid = Math.min(from.cash, amount);
       from.cash -= paid;
       if (to) to.cash += paid;
-      else if (this.rules.kafanaJackpot && paid > 0 && this.phase !== "over") this.kafanaPot += paid;
+      else if (this.rules.kafanaJackpot && paid > 0 && this.phase !== "over") {
+        // Say so out loud. Money leaving a player for the pot and reappearing
+        // in someone else's balance turns later reads like cash materialising
+        // out of nowhere, which is indistinguishable from a bug unless the pot
+        // is visible in the log.
+        this.kafanaPot += paid;
+        this._log("coffee", "#f4b73f",
+          `${fmt(paid)} went into the kafana pot (now ${fmt(this.kafanaPot)})`);
+      }
       if (paid < amount) this._bankrupt(from, to || null);
     }
 
