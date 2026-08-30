@@ -1,5 +1,5 @@
-ï»¿/* ============================================================================
- * Balkan Tycoon â€” styles.css
+/* ============================================================================
+ * Balkan Tycoon — styles.css
  * Zero-overflow viewport lock, 11x11 CSS grid board with reference-style
  * flag-header cards, SVG icon system, players + log side panel.
  * ========================================================================== */
@@ -33,7 +33,7 @@
 }
 
 /* The UA's [hidden] rule loses to any author `display`, so every component
- * that sets display (.btn, .turn-timer, .trade-cardâ€¦) would ignore the hidden
+ * that sets display (.btn, .turn-timer, .trade-card…) would ignore the hidden
  * attribute. Re-assert it once, globally, instead of per component. */
 [hidden] { display: none !important; }
 
@@ -234,7 +234,7 @@ body {
 .tile-top .tile__card { flex-direction: column-reverse; }
 .tile-top .tile__group { top: 0; bottom: auto; }
 /* the top row is inverted, so the owner plate flips edge and grow direction
-   (its lit side flips too â€” see .tile-top.is-owned in the ownership section) */
+   (its lit side flips too — see .tile-top.is-owned in the ownership section) */
 .tile-top .tile__owner { top: auto; bottom: 0; transform-origin: bottom center; }
 
 /* hover: group-color glow + lift toward the board center */
@@ -253,7 +253,7 @@ body {
 /* ---------- ownership, layer 1: wash + ring ----------
  * The wash falls from the center-facing edge and the ring outlines the whole
  * plot, both in the owner's seat color. This is the layer you read without
- * looking directly at the tile â€” it answers "taken or free?" at a glance,
+ * looking directly at the tile — it answers "taken or free?" at a glance,
  * before you focus enough to read the plate or the rent. A completed country
  * pushes the ring to full opacity and adds an inner glow. */
 .tile__tint {
@@ -362,7 +362,7 @@ body {
 
 /* ---------- ownership, layer 3: live rent ----------
  * On an owned plot the price is history, so the pill switches to what landing
- * there costs now â€” houses, set bonus and airport ladder included. Kept on a
+ * there costs now — houses, set bonus and airport ladder included. Kept on a
  * dark ground with the number in the owner's color: a third solid color block
  * next to the plate and the ring would be noise, and the digits have to stay
  * readable at 12px. The "R" prefix is there so rent can never be misread as
@@ -446,7 +446,7 @@ body {
 
 /* inverted top row: light the plate from below instead, so every plate on the
    board looks lit from the same direction on screen. Must follow the rule
-   above â€” same specificity, so source order decides. */
+   above — same specificity, so source order decides. */
 .tile-top.is-owned .tile__owner {
   background-image: linear-gradient(0deg, rgba(255, 255, 255, 0.24), rgba(0, 0, 0, 0.18));
   box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.4), 0 -2px 8px var(--oc-55, transparent);
@@ -587,8 +587,10 @@ body {
 
 .pawn {
   position: absolute;
-  width: max(28px, 3.3cqw);
-  height: max(28px, 3.3cqw);
+  /* up from 3.3cqw: the tokens are the thing you track around the board, and
+     they were losing out to the tile art at normal board sizes */
+  width: max(32px, 4cqw);
+  height: max(32px, 4cqw);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -778,7 +780,7 @@ body {
    a seat-coloured rule down the left, name on the baseline,
    money right-aligned in tabular figures, and two hairline
    meters (net worth, turn clock) pinned to the bottom edge.
-   No cards, no glow, no shadows â€” just rules and rhythm.
+   No cards, no glow, no shadows — just rules and rhythm.
    ============================================================ */
 
 .ic-chip { width: 9px; height: 9px; color: var(--green); }
@@ -1379,7 +1381,7 @@ body {
   letter-spacing: 0.02em;
 }
 
-/* a mortgaged deed is still yours but earns nothing â€” read it as dimmed */
+/* a mortgaged deed is still yours but earns nothing — read it as dimmed */
 .build-row.is-mortgaged { opacity: 0.72; }
 .build-row.is-mortgaged .build-row__color { filter: grayscale(0.75); }
 
@@ -1456,6 +1458,20 @@ body {
   outline: none;
   max-width: 110px;
   cursor: pointer;
+}
+
+/* Native dropdowns draw their popup with the UA's own palette. The closed
+   control inherited our near-white text, but the popup kept a white
+   background — so every option was white on white and unreadable. color-scheme
+   asks the UA to render the whole widget dark; the explicit option colours
+   cover engines that ignore it. */
+.select,
+.trade-select { color-scheme: dark; }
+
+.select option,
+.trade-select option {
+  background: var(--panel-2);
+  color: var(--cream);
 }
 
 .trade-columns {
@@ -1597,7 +1613,7 @@ body {
 }
 
 /* ============================================================
-   Property deed hover tooltip (deed.js) â€” strictly emoji-free:
+   Property deed hover tooltip (deed.js) — strictly emoji-free:
    clean typography, SVG icons and CSS badges only.
    ============================================================ */
 
@@ -1819,7 +1835,7 @@ body {
 .deed__token .ic-deed { width: 10px; height: 10px; }
 
 /* ============================================================
-   Player palette â€” seat colors as first-class design tokens.
+   Player palette — seat colors as first-class design tokens.
    The lobby assigns these from js/tokens.js PLAYER_COLORS; every
    roster row also gets --pc inline so components can tint
    themselves from the live roster instead of a fixed index.
@@ -1852,7 +1868,7 @@ body {
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease, transform 120ms ease;
 }
 
-/* reachable while the pre-game menu overlay (z 120) is up â€” unmuting is the
+/* reachable while the pre-game menu overlay (z 120) is up — unmuting is the
    first thing a player wants to do, before the match even starts */
 #btn-audio { position: relative; z-index: 130; }
 #modal-audio { z-index: 140; }
@@ -1945,7 +1961,7 @@ body {
 .stage-badge.offline { background: rgba(245, 158, 11, 0.16); color: #fbbf24; }
 
 /* ============================================================
-   LEFT DOCK â€” incoming trade cards + collapsible session log
+   LEFT DOCK — incoming trade cards + collapsible session log
    ============================================================ */
 
 .left-dock {
@@ -2449,7 +2465,7 @@ body {
 @keyframes reconnect-pulse { 50% { opacity: 0.5; } }
 
 /* ============================================================
-   The prison (corner tile) â€” a barred cell leaning toward the
+   The prison (corner tile) — a barred cell leaning toward the
    board centre plus a visiting yard on the outer edge.
 
    Two layers draw the same box:
@@ -2553,7 +2569,7 @@ body {
 /* Front set: the .jail-front grid item, above the pawn layer. */
 .jail-front {
   position: relative;
-  z-index: 8; /* pawn-layer is 7 â€” prisoners end up behind these bars */
+  z-index: 8; /* pawn-layer is 7 — prisoners end up behind these bars */
   pointer-events: none;
 }
 
@@ -2590,7 +2606,7 @@ body {
 .tile--at-br .jail__yard { align-items: flex-end; justify-content: flex-end; }
 .tile--at-bl .jail__yard { align-items: flex-end; justify-content: flex-start; }
 
-/* Printed on the board like the real thing â€” tokens stand on top of it. */
+/* Printed on the board like the real thing — tokens stand on top of it. */
 .jail__tag {
   display: inline-flex;
   align-items: center;
@@ -2610,8 +2626,9 @@ body {
 
 /* Slimmer tokens on the prison tile so the cell and the yard both breathe. */
 .pawn.pawn--jail {
-  width: max(21px, 2.5cqw);
-  height: max(21px, 2.5cqw);
+  /* kept proportionally slimmer than the new base size */
+  width: max(24px, 3cqw);
+  height: max(24px, 3cqw);
   border-width: 1.5px;
 }
 

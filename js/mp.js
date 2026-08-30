@@ -690,16 +690,29 @@
           this.dice.roll(() => {}, [event.d1, event.d2], { interrupt: true });
           break;
         case "pawn-move": {
-          this._animating.add(event.playerId);
           const player = g && g.player(event.playerId);
           const pawn = this.pawnLayer.pawns.get(event.playerId);
-          const from = pawn ? pawn.pos : event.from;
+          /* The host's `from` is authoritative. This used to hop from the
+           * guest's own belief of where the pawn stood, so any drift — a
+           * dropped event, or a snapshot landing mid-hop — made the pawn walk
+           * from the wrong tile and stop a field short or long. It looked like
+           * the player moved one square too far, and stayed wrong until the
+           * next snapshot silently snapped it back. Re-seat on the host's
+           * start tile first, then animate, then land on the exact target
+           * rather than wherever the animation happened to finish. */
+          if (pawn && pawn.pos !== event.from) {
+            this.pawnLayer.placeAt(event.playerId, event.from);
+          }
+          this._animating.add(event.playerId);
+          const ring = window.BT.TILES.length;
+          const target = (((event.from + event.steps) % ring) + ring) % ring;
           this.pawnLayer
-            .hopTo(event.playerId, from, event.steps, { onPassGo: () => {} })
-            .then((pos) => {
+            .hopTo(event.playerId, event.from, event.steps, { onPassGo: () => {} })
+            .then(() => {
               this._animating.delete(event.playerId);
-              UI.flashTile(pos);
-              if (player) player.position = pos;
+              this.pawnLayer.placeAt(event.playerId, target);
+              UI.flashTile(target);
+              if (player) player.position = target;
             });
           break;
         }
