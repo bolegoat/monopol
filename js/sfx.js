@@ -34,15 +34,23 @@
  *   presence   offline()  online()
  *   endgame    bankrupt()  win()
  *
- * Autoplay policy: muted on first load, nothing is built until the player
- * unmutes, context resumed on the first real gesture.
+ * Autoplay policy: sound is on by default but nothing is synthesised until the
+ * first real gesture, which resumes the context. An explicit mute persists.
  * ========================================================================== */
 
 "use strict";
 
 (function () {
   const STORE_KEY = "bt_audio";
-  const DEFAULTS = { music: 0.4, sfx: 0.7, muted: true };
+  /* Sound is ON for a first-time visitor. It used to default to muted, which is
+   * not what the autoplay policy actually requires — the policy only forbids
+   * playing before a user gesture, and unlock() below already handles that by
+   * keeping live() silent until the first pointerdown/keydown/touchstart. The
+   * muted default meant anyone opening the hosted build heard nothing and had
+   * no reason to suspect a speaker button was the cause. Since settings live in
+   * localStorage, which is per-origin, unmuting on localhost never carried over
+   * to the deployed domain either. */
+  const DEFAULTS = { music: 0.4, sfx: 0.7, muted: false };
 
   /* A minor pentatonic — the whole kit is built from these. */
   const HZ = {
@@ -71,7 +79,9 @@
       return {
         music: clamp01(Number(raw.music), DEFAULTS.music),
         sfx: clamp01(Number(raw.sfx), DEFAULTS.sfx),
-        muted: raw.muted !== false, // anything but an explicit false stays muted
+        // only a stored boolean counts, so a player who deliberately muted stays
+        // muted while a partial or legacy record falls back to the default
+        muted: typeof raw.muted === "boolean" ? raw.muted : DEFAULTS.muted,
       };
     } catch (e) {
       return { ...DEFAULTS };
