@@ -345,6 +345,24 @@
         </div>
       </div>
 
+      <!-- settle a debt by hand: no close button, this one is mandatory -->
+      <div class="modal-overlay" id="modal-debt" hidden>
+        <div class="modal modal-debt">
+          <div class="modal-card-icon" data-icon="alert"></div>
+          <h2 class="modal-title">You are short</h2>
+          <p class="modal-price" id="debt-amount">&euro;0</p>
+          <p class="modal-note" id="debt-who"></p>
+          <p class="modal-note" id="debt-note"></p>
+          <p class="modal-note">Mortgage or sell what you need, then settle. Nothing is sold
+             for you.</p>
+          <div class="modal-actions modal-actions-col">
+            <button class="btn btn-primary" id="btn-debt-raise" type="button">Raise cash</button>
+            <button class="btn" id="btn-debt-pay" type="button">Settle the debt</button>
+            <button class="btn btn-danger" id="btn-debt-bankrupt" type="button">Declare bankruptcy</button>
+          </div>
+        </div>
+      </div>
+
       <!-- manage properties: build, sell, mortgage -->
       <div class="modal-overlay" id="modal-build" hidden>
         <div class="modal modal-build">

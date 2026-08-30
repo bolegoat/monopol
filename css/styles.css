@@ -1939,6 +1939,16 @@ body {
    cash, so it has to sit above it in the stack */
 #modal-build { z-index: 125; }
 
+/* conceding the game should not look like an ordinary button */
+.btn.btn-danger {
+  color: #ffb4b4;
+  border-color: rgba(239, 68, 68, 0.42);
+  background: rgba(239, 68, 68, 0.09);
+}
+.btn.btn-danger:hover { background: rgba(239, 68, 68, 0.18); border-color: rgba(239, 68, 68, 0.7); }
+
+.modal-debt .modal-price { color: var(--red); }
+
 .modal-audio { width: min(430px, 92vw); text-align: left; }
 .modal-audio .modal-title, .modal-audio .modal-note, .modal-audio .modal-card-icon { text-align: center; }
 .modal-audio .modal-card-icon { margin-inline: auto; }

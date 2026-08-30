@@ -75,6 +75,9 @@
       paidRent: (_payer, _owner, amount) => { UI.muteNextCashSound(); window.BT.sfx.rent(amount); },
       paidTax: (_player, amount) => { UI.muteNextCashSound(); window.BT.sfx.tax(amount); },
       bankrupted: () => window.BT.sfx.bankrupt(),
+      // presence of this hook is what switches the engine from selling a
+      // player's property for them to asking them to deal with it
+      debtRaised: (player) => UI.openDebt(game, player),
       showCard: (card) => UI.showCard(card),
       auctionStep: (ctx) => UI.auctionStep(ctx),
       jailChoice: (player) => {
@@ -96,6 +99,8 @@
     UI.mortgageHandler = (tileId) => game.mortgage(game.current, tileId);
     UI.unmortgageHandler = (tileId) => game.unmortgage(game.current, tileId);
     UI.sellFieldHandler = (tileId) => game.sellField(game.current, tileId);
+    UI.settleHandler = () => game.settleDebt(UI._debtPlayer || game.current);
+    UI.bankruptHandler = () => game.declareBankrupt(UI._debtPlayer || game.current);
     defs.forEach((_, i) => pawnLayer.addPlayer(game.players[i], i));
     UI.sync(game);
     UI.log("dice", "#f4b73f", "Match started — good luck!");

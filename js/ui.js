@@ -812,6 +812,43 @@
     // a pending buy prompt re-checks affordability after any state change, so
     // mortgaging mid-prompt enables the Buy button without reopening anything
     if (UI._buyRefresh) UI._buyRefresh();
+    if (UI._debtRefresh) UI._debtRefresh();
+  };
+
+  UI.settleHandler = null;
+  UI.bankruptHandler = null;
+
+  /**
+   * Mandatory settle prompt. Deliberately has no dismiss: the engine has
+   * stopped in the `settling` phase and will not advance until this is
+   * answered, so an escape hatch would just wedge the game.
+   */
+  UI.openDebt = function (game, player) {
+    UI._debtPlayer = player;
+    const refresh = () => {
+      const d = game.debtOf(player);
+      if (!d) { // settled or conceded — the prompt has done its job
+        UI._debtRefresh = null;
+        closeModal("#modal-debt");
+        return;
+      }
+      const short = d.amount - player.cash;
+      $("#debt-amount").innerHTML = "\u20ac" + d.amount;
+      $("#debt-who").textContent = d.to ? "owed to " + d.to.name : "owed to the bank";
+      $("#debt-note").textContent = short > 0
+        ? "\u20ac" + player.cash + " in hand \u00b7 \u20ac" + short + " short \u00b7 \u20ac"
+          + game.raisableCash(player) + " still raisable"
+        : "\u20ac" + player.cash + " in hand \u2014 enough to settle";
+      $("#btn-debt-pay").disabled = short > 0;
+      // no way out: say so rather than letting them hunt for a button
+      $("#btn-debt-raise").disabled = game.raisableCash(player) <= 0;
+    };
+    refresh();
+    UI._debtRefresh = refresh;
+    openModal("#modal-debt");
+    $("#btn-debt-raise").onclick = () => UI.openBuild(game);
+    $("#btn-debt-pay").onclick = () => UI.settleHandler && UI.settleHandler();
+    $("#btn-debt-bankrupt").onclick = () => UI.bankruptHandler && UI.bankruptHandler();
   };
   /* ================= Modals (Promise-based) ================= */
 

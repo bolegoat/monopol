@@ -84,6 +84,9 @@
         position: START_POS,
         inJail: false,
         jailTurns: 0,
+        // flat fields, not an object: players are shallow-copied into snapshots
+        debtAmount: 0,
+        debtTo: null,
         getOutCards: 0,
         skipTurns: 0,
         bankrupt: false,
@@ -313,13 +316,11 @@
       if (this.alive().length === 1) this._endGame(this.alive()[0], "last tycoon standing");
     }
 
-    _pay(from, amount, to) {
-      if (amount <= 0 || from.bankrupt) return;
-      if (from.cash < amount) this._liquidate(from, amount);
-      const paid = Math.min(from.cash, amount);
-      from.cash -= paid;
-      if (to) to.cash += paid;
-      else if (this.rules.kafanaJackpot && paid > 0 && this.phase !== "over") {
+    /** Route a payment to its recipient, or to the bank / kafana pot. */
+    _creditPayment(paid, to) {
+      if (paid <= 0) return;
+      if (to) { to.cash += paid; return; }
+      if (this.rules.kafanaJackpot && this.phase !== "over") {
         // Say so out loud. Money leaving a player for the pot and reappearing
         // in someone else's balance turns later reads like cash materialising
         // out of nowhere, which is indistinguishable from a bug unless the pot
@@ -328,7 +329,96 @@
         this._log("coffee", "#f4b73f",
           `${fmt(paid)} went into the kafana pot (now ${fmt(this.kafanaPot)})`);
       }
+    }
+
+    /**
+     * Take `amount` off `from`.
+     *
+     * When they cannot cover it the shortfall becomes a DEBT they clear
+     * themselves — the engine no longer quietly sells their houses, mortgages
+     * their deeds and declares them bankrupt on their behalf. Play stops in the
+     * `settling` phase until they either pay or concede.
+     *
+     * The automatic path survives as a fallback for when nothing is listening
+     * for `debtRaised`: without a prompt on the other end a match would sit
+     * forever waiting for an answer that never comes.
+     */
+    _pay(from, amount, to) {
+      if (amount <= 0 || from.bankrupt) return;
+
+      if (from.cash < amount && this.hooks.debtRaised) {
+        const paid = from.cash;
+        from.cash = 0;
+        this._creditPayment(paid, to);
+        const owed = amount - paid;
+        from.debtAmount = owed;
+        from.debtTo = to ? to.id : null;
+        this.phase = "settling";
+        this._log("⚠️", "#ef4444",
+          `${from.name} is ${fmt(owed)} short${to ? " paying " + to.name : ""} and must raise it`);
+        this._changed();
+        this.hooks.debtRaised(from, owed, to || null);
+        return;
+      }
+
+      if (from.cash < amount) this._liquidate(from, amount);
+      const paid = Math.min(from.cash, amount);
+      from.cash -= paid;
+      this._creditPayment(paid, to);
       if (paid < amount) this._bankrupt(from, to || null);
+    }
+
+    /* ---------- settling a debt by hand ---------- */
+
+    debtOf(p) {
+      return p && p.debtAmount > 0
+        ? { amount: p.debtAmount, to: p.debtTo ? this.player(p.debtTo) : null }
+        : null;
+    }
+
+    /** Everything they could still turn into cash, for the settle prompt. */
+    raisableCash(p) {
+      let total = 0;
+      for (const t of this.ownedTiles(p)) {
+        const ps = this.props[t.id];
+        total += (ps.houses || 0) * Math.round(t.houseCost * ECONOMY.sellRate);
+        if (!ps.mortgaged) {
+          total += this.rules.mortgages
+            ? Math.round(t.price * ECONOMY.mortgageRate)
+            : Math.round(t.price * ECONOMY.sellRate);
+        }
+      }
+      return total;
+    }
+
+    canSettle(p) {
+      return Boolean(p && p.debtAmount > 0 && p.cash >= p.debtAmount);
+    }
+
+    settleDebt(p) {
+      if (!this.canSettle(p)) return false;
+      const owed = p.debtAmount;
+      const to = p.debtTo ? this.player(p.debtTo) : null;
+      p.cash -= owed;
+      p.debtAmount = 0;
+      p.debtTo = null;
+      this._creditPayment(owed, to);
+      this._log("💵", "#22c55e", `${p.name} settled ${fmt(owed)}${to ? " with " + to.name : ""}`);
+      if (this.phase === "settling") this.phase = "turn-end";
+      this._changed();
+      return true;
+    }
+
+    /** The player's own call, never the engine's. */
+    declareBankrupt(p) {
+      if (!p || p.bankrupt) return false;
+      const to = p.debtTo ? this.player(p.debtTo) : null;
+      p.debtAmount = 0;
+      p.debtTo = null;
+      if (this.phase === "settling") this.phase = "turn-end";
+      this._bankrupt(p, to);
+      this._changed();
+      return true;
     }
 
     /* ---------- movement ---------- */
@@ -642,6 +732,8 @@
     }
 
     _finishTurn() {
+      // a debt raised during this turn's landing must not be papered over
+      if (this.phase === "settling") { this._changed(); return; }
       if (this.phase !== "over") this.phase = "turn-end";
       this._changed();
     }
