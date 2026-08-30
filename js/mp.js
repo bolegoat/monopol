@@ -602,6 +602,21 @@
           if (p && tile && g.props[tile.id] && g.props[tile.id].owner === fromId) g.sellHouse(p, tile.id);
           break;
         }
+        /* Deed actions. The engine's can* guards cover the rules; the host adds
+         * the two checks a client must never be trusted with — that the deed is
+         * really theirs, and that it is really their turn. */
+        case "mortgage":
+        case "unmortgage":
+        case "sell-field": {
+          const p = g.player(fromId);
+          const tile = tileById(String(action.tileId));
+          if (!p || !tile || !g.props[tile.id] || g.props[tile.id].owner !== fromId) break;
+          if (g.current.id !== fromId) break;
+          if (action.kind === "mortgage") g.mortgage(p, tile.id);
+          else if (action.kind === "unmortgage") g.unmortgage(p, tile.id);
+          else g.sellField(p, tile.id);
+          break;
+        }
       }
     }
     /* ================= host: broadcast + timer ================= */
@@ -797,6 +812,24 @@
       if (!this.game) return;
       if (this.isHost) this.game.build(this.game.player(this.myId), tileId);
       else this.net.sendAction({ kind: "build", tileId });
+    }
+
+    clickMortgage(tileId) {
+      if (!this.game) return;
+      if (this.isHost) this.game.mortgage(this.game.player(this.myId), tileId);
+      else this.net.sendAction({ kind: "mortgage", tileId });
+    }
+
+    clickUnmortgage(tileId) {
+      if (!this.game) return;
+      if (this.isHost) this.game.unmortgage(this.game.player(this.myId), tileId);
+      else this.net.sendAction({ kind: "unmortgage", tileId });
+    }
+
+    clickSellField(tileId) {
+      if (!this.game) return;
+      if (this.isHost) this.game.sellField(this.game.player(this.myId), tileId);
+      else this.net.sendAction({ kind: "sell-field", tileId });
     }
 
     clickSell(tileId) {

@@ -109,17 +109,19 @@
     return icon("help", cls);
   }
 
-  /* Flag backgrounds: real PNG first (public/flags/{id}.png), inline-SVG
-   * underneath so it always renders. The PNG layer is only added for countries
-   * listed in BT.FLAG_PNGS, so a country that ships SVG-only never fires a
-   * request for a file that does not exist.
+  /* Flag backgrounds: the real flag file (public/flags/{id}.svg) on top, the
+   * inline-SVG fallback underneath so something always renders. The file layer
+   * is only added for ids listed in BT.FLAG_FILES, so a country with no file
+   * never fires a request for one that does not exist.
    * NOTE: single quotes inside url() — this string is embedded in a
    * double-quoted style="" attribute. */
   function flagBg(cid) {
     const BT = window.BT || {};
     const svg = encodeURIComponent((BT.FLAGS && BT.FLAGS[cid]) || "");
     const layers = [];
-    if (BT.FLAG_PNGS && BT.FLAG_PNGS.has(cid)) layers.push("url('public/flags/" + cid + ".png')");
+    if (BT.FLAG_FILES && BT.FLAG_FILES.has(cid)) {
+      layers.push("url('public/flags/" + cid + "." + (BT.FLAG_EXT || "svg") + "')");
+    }
     layers.push("url('data:image/svg+xml," + svg + "')");
     const size = layers.map(() => "cover").join(",");
     const pos = layers.map(() => "center").join(",");

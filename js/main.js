@@ -93,6 +93,9 @@
     window.BT.game = game;
     UI.buildHandler = (tileId) => game.build(game.current, tileId);
     UI.sellHandler = (tileId) => game.sellHouse(game.current, tileId);
+    UI.mortgageHandler = (tileId) => game.mortgage(game.current, tileId);
+    UI.unmortgageHandler = (tileId) => game.unmortgage(game.current, tileId);
+    UI.sellFieldHandler = (tileId) => game.sellField(game.current, tileId);
     defs.forEach((_, i) => pawnLayer.addPlayer(game.players[i], i));
     UI.sync(game);
     UI.log("dice", "#f4b73f", "Match started — good luck!");
@@ -115,6 +118,9 @@
       UI.setRoomChip(res.code || code || "");
       UI.buildHandler = (tileId) => mp.clickBuild(tileId);
       UI.sellHandler = (tileId) => mp.clickSell(tileId);
+      UI.mortgageHandler = (tileId) => mp.clickMortgage(tileId);
+      UI.unmortgageHandler = (tileId) => mp.clickUnmortgage(tileId);
+      UI.sellFieldHandler = (tileId) => mp.clickSellField(tileId);
       return res;
     });
   }
@@ -133,6 +139,9 @@
       UI.setRoomChip(net.code || "");
       UI.buildHandler = (tileId) => mp.clickBuild(tileId);
       UI.sellHandler = (tileId) => mp.clickSell(tileId);
+      UI.mortgageHandler = (tileId) => mp.clickMortgage(tileId);
+      UI.unmortgageHandler = (tileId) => mp.clickUnmortgage(tileId);
+      UI.sellFieldHandler = (tileId) => mp.clickSellField(tileId);
       return res;
     }).catch(() => {
       // stale session — forget it quietly and stay on the menu

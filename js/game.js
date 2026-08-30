@@ -26,6 +26,7 @@
       doubleRent: true,      // full color set doubles undeveloped base rent
       kafanaJackpot: false,  // taxes & fines pile up in the kafana pot
       auctions: false,       // declined properties go to public bidding
+      mortgages: true,       // deeds can be mortgaged to raise cash
     },
   };
 
@@ -90,7 +91,7 @@
       this.props = {};
       for (const t of TILES) {
         if (t.kind === "city" || t.kind === "airport" || t.kind === "utility") {
-          this.props[t.id] = { owner: null, houses: 0 };
+          this.props[t.id] = { owner: null, houses: 0, mortgaged: false };
         }
       }
       this.turnIdx = 0;
@@ -120,15 +121,94 @@
     netWorth(p) {
       let total = p.cash;
       for (const t of this.ownedTiles(p)) {
+        const ps = this.props[t.id];
         total += t.price || 0;
-        total += (this.props[t.id].houses || 0) * (t.houseCost || 0);
+        total += (ps.houses || 0) * (t.houseCost || 0);
+        // a mortgaged deed is worth its price minus the loan still outstanding
+        if (ps.mortgaged) total -= Math.round((t.price || 0) * ECONOMY.mortgageRate);
       }
       return total;
+    }
+
+    /* ---------- mortgages ----------
+     * A mortgage raises half the tile price now against the deed. The plot stays
+     * yours but earns nothing until you buy it back, which costs the loan plus
+     * interest — so it is a way to survive a bad turn, not free money.
+     * Houses must come off first: you cannot borrow against a developed plot. */
+
+    canMortgage(player, tile) {
+      if (!this.rules.mortgages) return false;
+      const ps = this.props[tile.id];
+      return Boolean(ps) && ps.owner === player.id && !ps.mortgaged && (ps.houses || 0) === 0;
+    }
+
+    /** What buying the deed back costs right now. */
+    unmortgageCost(tile) {
+      return Math.round(tile.price * ECONOMY.mortgageRate * (1 + ECONOMY.unmortgageInterest));
+    }
+
+    canUnmortgage(player, tile) {
+      if (!this.rules.mortgages) return false;
+      const ps = this.props[tile.id];
+      if (!ps || ps.owner !== player.id || !ps.mortgaged) return false;
+      return player.cash >= this.unmortgageCost(tile);
+    }
+
+    mortgage(player, tileId) {
+      const tile = tileById(tileId);
+      if (!this.canMortgage(player, tile)) return false;
+      const raised = Math.round(tile.price * ECONOMY.mortgageRate);
+      this.props[tile.id].mortgaged = true;
+      player.cash += raised;
+      this._log("🏦", "#f59e0b", `${player.name} mortgaged ${tile.name} for ${fmt(raised)}`);
+      if (this.hooks.mortgaged) this.hooks.mortgaged(player, tile, raised);
+      this._changed();
+      return true;
+    }
+
+    unmortgage(player, tileId) {
+      const tile = tileById(tileId);
+      if (!this.canUnmortgage(player, tile)) return false;
+      const cost = this.unmortgageCost(tile);
+      this.props[tile.id].mortgaged = false;
+      player.cash -= cost;
+      this._log("🔑", "#22c55e", `${player.name} cleared the mortgage on ${tile.name} for ${fmt(cost)}`);
+      if (this.hooks.unmortgaged) this.hooks.unmortgaged(player, tile, cost);
+      this._changed();
+      return true;
+    }
+
+    /* Selling a deed back to the bank at half price. Mortgaged plots are
+     * excluded because their value has already been drawn down; clear the
+     * mortgage first, or let bankruptcy hand them over. */
+    canSellField(player, tile) {
+      const ps = this.props[tile.id];
+      return Boolean(ps) && ps.owner === player.id && (ps.houses || 0) === 0 && !ps.mortgaged;
+    }
+
+    sellField(player, tileId) {
+      const tile = tileById(tileId);
+      if (!this.canSellField(player, tile)) return false;
+      const paid = Math.round(tile.price * ECONOMY.sellRate);
+      this.props[tile.id].owner = null;
+      player.cash += paid;
+      this._log("🏦", "#f59e0b", `${player.name} sold ${tile.name} back to the bank for ${fmt(paid)}`);
+      if (this.hooks.soldField) this.hooks.soldField(player, tile, paid);
+      this._changed();
+      return true;
+    }
+
+    /** Tiles `player` could still raise cash against, dearest first. */
+    mortgageable(player) {
+      return this.ownedTiles(player)
+        .filter((t) => this.canMortgage(player, t))
+        .sort((a, b) => b.price - a.price);
     }
 
     rentFor(tile) {
       const ps = this.props[tile.id];
       if (!ps || !ps.owner) return 0;
+      if (ps.mortgaged) return 0; // a mortgaged plot collects nothing
       if (tile.kind === "airport") {
         const count = TILES.filter(
           (t) => t.kind === "airport" && this.props[t.id].owner === ps.owner,
@@ -150,11 +230,17 @@
     }
 
     buildableGroups(player) {
-      return Object.keys(COUNTRIES).filter((cid) => this.ownsGroup(player, cid));
+      return Object.keys(COUNTRIES).filter((cid) =>
+        this.ownsGroup(player, cid)
+        // a country with a mortgaged deed is owned but frozen, so it must not
+        // be offered in the build list where nothing in it can be built
+        && !COUNTRY_GROUPS[cid].some((id) => this.props[id].mortgaged));
     }
 
     canBuildOn(player, tile) {
       if (tile.kind !== "city" || !this.ownsGroup(player, tile.country)) return false;
+      // nothing gets built in a country while any of its deeds is mortgaged
+      if (COUNTRY_GROUPS[tile.country].some((id) => this.props[id].mortgaged)) return false;
       const ps = this.props[tile.id];
       if (ps.houses >= ECONOMY.maxHouses) return false;
       if (player.cash < tile.houseCost) return false;
@@ -187,8 +273,20 @@
         p.cash += Math.round(t.houseCost * ECONOMY.sellRate);
         this._log("🏚️", "#f59e0b", `${p.name} sold a house on ${t.name}`);
       }
-      const sellProps = () =>
-        TILES.filter((t) => this.props[t.id] && this.props[t.id].owner === p.id && this.props[t.id].houses === 0);
+      // mortgage before selling: a mortgage is recoverable, a sale is not, and
+      // both raise the same 50%, so there is never a reason to sell first
+      while (p.cash < amount) {
+        const t = this.mortgageable(p)[0];
+        if (!t) break;
+        this.mortgage(p, t.id);
+      }
+
+      // last resort: hand deeds back to the bank. Already-mortgaged plots are
+      // skipped because their value has been drawn down once already.
+      const sellProps = () => TILES.filter((t) => {
+        const ps = this.props[t.id];
+        return ps && ps.owner === p.id && ps.houses === 0 && !ps.mortgaged;
+      });
       while (p.cash < amount && sellProps().length) {
         const t = sellProps().sort((a, b) => b.price - a.price)[0];
         this.props[t.id].owner = null;
@@ -206,6 +304,8 @@
         if (ps && ps.owner === p.id) {
           ps.owner = creditor ? creditor.id : null;
           ps.houses = 0;
+          // debts follow the deed to the creditor; the bank clears them
+          if (!creditor) ps.mortgaged = false;
         }
       }
       this.hooks.teleportPawn(p, p.position); // refresh pawn (bankrupt styling)

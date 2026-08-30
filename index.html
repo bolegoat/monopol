@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -43,7 +43,7 @@
               <div class="board-logo">
                 <span class="board-logo-top">BALKAN</span>
                 <span class="board-logo-bottom">TYCOON</span>
-                <span class="board-logo-sub">9 countries · 40 tiles · one empire</span>
+                <span class="board-logo-sub">9 countries � 40 tiles � one empire</span>
               </div>
               <div class="last-roll" id="last-roll" aria-live="polite"></div>
               <canvas id="dice-canvas"></canvas>
@@ -58,7 +58,7 @@
               <span class="btn-ic" data-icon="exchange"></span>Trade<kbd class="btn-kbd">T</kbd>
             </button>
             <button class="btn" id="btn-build" disabled>
-              <span class="btn-ic" data-icon="house"></span>Build<kbd class="btn-kbd">B</kbd>
+              <span class="btn-ic" data-icon="house"></span>Manage<kbd class="btn-kbd">B</kbd>
             </button>
             <button class="btn" id="btn-end-turn" disabled>
               <span class="btn-ic" data-icon="arrowRight"></span>End Turn<kbd class="btn-kbd">E</kbd>
@@ -344,11 +344,12 @@
         </div>
       </div>
 
-      <!-- build houses -->
+      <!-- manage properties: build, sell, mortgage -->
       <div class="modal-overlay" id="modal-build" hidden>
         <div class="modal modal-build">
-          <h2 class="modal-title">Build Houses</h2>
-          <p class="modal-note">Own a full country to build. Houses must be built evenly.</p>
+          <h2 class="modal-title">Your Properties</h2>
+          <p class="modal-note">Build, sell, mortgage or sell off — any time on your turn.
+             A full country is needed to build, and houses go up evenly.</p>
           <div class="build-list" id="build-list"></div>
           <div class="modal-actions">
             <button class="btn btn-primary" id="btn-build-close">Done</button>
@@ -424,7 +425,7 @@
         <div class="modal modal-audio">
           <div class="modal-card-icon" data-icon="volume"></div>
           <h2 class="modal-title">Sound</h2>
-          <p class="modal-note">Effects only — no background music. Sound starts on the first click.</p>
+          <p class="modal-note">Effects only � no background music. Sound starts on the first click.</p>
 
           <label class="switch-row">
             <span class="switch-txt"><b>Mute everything</b><small>Silences every sound effect</small></span>

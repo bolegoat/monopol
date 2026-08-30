@@ -1366,6 +1366,24 @@ body {
   gap: 3px;
 }
 .build-row__houses .ic-chip { color: var(--green); }
+
+/* property manager: a row now carries up to four actions, so they group at the
+   end and the row stretches to fit rather than squeezing the name */
+.build-row__main { flex: 1 1 auto; min-width: 0; }
+.build-row__acts { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+
+.build-row__flag {
+  font-style: normal;
+  font-weight: 800;
+  color: var(--gold);
+  letter-spacing: 0.02em;
+}
+
+/* a mortgaged deed is still yours but earns nothing — read it as dimmed */
+.build-row.is-mortgaged { opacity: 0.72; }
+.build-row.is-mortgaged .build-row__color { filter: grayscale(0.75); }
+
+.build-row__btn--sell:not(:disabled):hover { color: #ff9d9d; border-color: rgba(239, 68, 68, 0.5); }
 .ic-chip--house { color: var(--house); }
 .ic-chip--hotel { color: var(--hotel); width: 12px; height: 12px; }
 .build-row__houses .ic-chip--house { color: var(--house); }

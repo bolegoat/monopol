@@ -155,17 +155,18 @@ function tierPrice(countryId, n) {
 }
 
 /* ---------- Flags ----------
- * Every country has a hand-drawn inline SVG below, and most also have a real
- * photo-quality PNG in public/flags. FLAG_PNGS lists which PNGs actually exist
- * so flagBg() can skip the image layer for the rest — otherwise the browser
- * requests a file that is not there and every one of that country's tiles logs
- * a failed request. Add a filename here when you drop a new PNG in.
+ * Every country has a hand-drawn inline SVG fallback below (see FLAGS), and
+ * most also have a proper flag file in public/flags/{id}.svg which is layered
+ * on top of it. FLAG_FILES lists which files actually exist so flagBg() can
+ * skip the image layer for the rest — otherwise the browser requests a file
+ * that is not there and every one of that country's tiles logs a failed
+ * request. Add an id here when you drop a new flag in.
  *
- * Kosovo is deliberately absent: the shipped xk.png was a crude placeholder,
- * so the inline SVG (six stars in an arc over the gold map) is the better of
- * the two and is used on its own. */
+ * Kosovo is deliberately absent: it has no file, so it renders from the inline
+ * SVG alone (six stars in an arc over the gold map). */
 
-const FLAG_PNGS = new Set(["al", "ba", "bg", "hr", "me", "mk", "rs", "si"]);
+const FLAG_EXT = "svg";
+const FLAG_FILES = new Set(["al", "ba", "bg", "hr", "me", "mk", "rs", "si"]);
 
 /* ---------- Compact inline SVG flags (viewBox 0 0 24 16) ---------- */
 
@@ -231,6 +232,8 @@ const ECONOMY = {
   jailFee: 50,
   houseCostRate: 0.5, // house price = 50% of tile price
   sellRate: 0.5, // sell-back = 50% of house cost
+  mortgageRate: 0.5, // raise 50% of the tile price against the deed
+  unmortgageInterest: 0.1, // buying it back costs the loan plus 10%
   baseRentRate: 0.1, // base rent = 10% of tile price
   monopolyMultiplier: 2, // full group, undeveloped = 2x base rent
   houseMultipliers: [1, 5, 12, 28, 40], // level 0..4 (4 = hotel)
@@ -539,7 +542,7 @@ function validateBoard() {
 
 /* Expose to the other classic scripts / console debugging. */
 window.BT = Object.assign(window.BT || {}, {
-  COUNTRIES, FLAGS, FLAG_PNGS, ECONOMY, TILES, GRID_SIZE,
+  COUNTRIES, FLAGS, FLAG_FILES, FLAG_EXT, ECONOMY, TILES, GRID_SIZE,
   gridPos, tileSide, tileById, tileIndex, COUNTRY_GROUPS,
   cornerAnchor, inwardVec, JAIL_GEO,
   CITY_DISTRIBUTION, GDP_ORDER, CITY_PRICES, tierPrice, validateBoard,

@@ -759,10 +759,13 @@
       (phase === "awaiting-jail-roll" ? "Roll Doubles" : "Roll Dice") +
       '<kbd class="btn-kbd">R</kbd>';
     $("#btn-end-turn").disabled = !mine || phase !== "turn-end";
-    const canBuild =
+    // the property manager is not just for building: mortgaging, buying deeds
+    // back and selling off are all done here, so it opens whenever you own
+    // anything at all on your own turn — not only with a full set in hand
+    const canManage =
       (phase === "awaiting-roll" || phase === "turn-end") &&
-      game.buildableGroups(game.current).length > 0;
-    $("#btn-build").disabled = !mine || !canBuild;
+      game.ownedTiles(game.current).length > 0;
+    $("#btn-build").disabled = !mine || !canManage;
     $("#btn-trade").disabled =
       phase === "over" ||
       game.current.bankrupt ||
@@ -983,54 +986,123 @@
   UI.buildHandler = null;
   UI.sellHandler = null;
 
+  UI.mortgageHandler = null;
+  UI.unmortgageHandler = null;
+  UI.sellFieldHandler = null;
+
+  /* ---------------------------------------------------------------------------
+   * Property manager
+   *
+   * Everything you can do with a deed on your own turn, in one place: build and
+   * sell houses, mortgage and buy back, or sell a plot to the bank. It used to
+   * list only full country sets, which meant raising cash was impossible unless
+   * you happened to own a complete colour group — and the rest of the time the
+   * button was simply disabled. Now every owned tile appears, grouped by country
+   * with airports and utilities at the end, and each row only enables the
+   * actions the rules actually permit right now.
+   * ------------------------------------------------------------------------ */
+
+  function manageRow(game, p, tile, swatch) {
+    const ps = game.props[tile.id];
+    const row = document.createElement("div");
+    row.className = "build-row" + (ps.mortgaged ? " is-mortgaged" : "");
+
+    const state = ps.mortgaged
+      ? '<em class="build-row__flag">Mortgaged</em>'
+      : ps.houses >= ECONOMY.maxHouses
+        ? icon("houseSolid", "ic-chip ic-chip--hotel") + " Hotel"
+        : ps.houses > 0
+          ? Array.from({ length: ps.houses },
+            () => icon("houseSolid", "ic-chip ic-chip--house")).join("")
+          : "no houses";
+
+    row.innerHTML =
+      '<span class="build-row__color" style="background:' + swatch + '"></span>' +
+      '<span class="build-row__main"><span class="build-row__name">' + esc(tile.name) + "</span><br>" +
+      '<span class="build-row__houses">' + state +
+        " &middot; rent " + (ps.mortgaged ? "&euro;0" : "&euro;" + game.rentFor(tile)) +
+      "</span></span>";
+
+    const btn = (label, title, enabled, fn, cls) => {
+      const b = document.createElement("button");
+      b.className = "build-row__btn" + (cls ? " " + cls : "");
+      b.innerHTML = label;
+      b.title = title;
+      b.disabled = !enabled;
+      if (enabled) b.onclick = fn;
+      return b;
+    };
+
+    const acts = document.createElement("span");
+    acts.className = "build-row__acts";
+
+    if (tile.kind === "city") {
+      acts.append(
+        btn(icon("x", "ic-btn"), "Sell a house for \u20ac" +
+          Math.round(tile.houseCost * ECONOMY.sellRate),
+        game.canSellOn(p, tile), () => UI.sellHandler && UI.sellHandler(tile.id)),
+        btn("+", "Build a house for \u20ac" + tile.houseCost,
+          game.canBuildOn(p, tile), () => UI.buildHandler && UI.buildHandler(tile.id)),
+      );
+    }
+
+    if (game.rules.mortgages) {
+      acts.append(ps.mortgaged
+        ? btn(icon("key", "ic-btn"), "Buy the deed back for \u20ac" + game.unmortgageCost(tile),
+          game.canUnmortgage(p, tile), () => UI.unmortgageHandler && UI.unmortgageHandler(tile.id))
+        : btn(icon("banknote", "ic-btn"), "Mortgage for \u20ac" +
+            Math.round(tile.price * ECONOMY.mortgageRate),
+        game.canMortgage(p, tile), () => UI.mortgageHandler && UI.mortgageHandler(tile.id)));
+    }
+
+    acts.append(btn(icon("coins", "ic-btn"),
+      "Sell to the bank for \u20ac" + Math.round(tile.price * ECONOMY.sellRate),
+      game.canSellField(p, tile), () => UI.sellFieldHandler && UI.sellFieldHandler(tile.id),
+      "build-row__btn--sell"));
+
+    row.append(acts);
+    return row;
+  }
+
   UI.openBuild = function (game) {
     const list = $("#build-list");
     UI._buildGame = game;
+
     const render = () => {
       const p = game.current;
       list.innerHTML = "";
-      const groups = game.buildableGroups(p);
-      if (!groups.length) {
-        list.innerHTML = '<p class="modal-note" style="text-align:center">You need a full country set first.</p>';
+      const owned = game.ownedTiles(p);
+      if (!owned.length) {
+        list.innerHTML = '<p class="modal-note" style="text-align:center">You do not own anything yet.</p>';
         return;
       }
-      for (const cid of groups) {
+
+      // cities grouped by country, in board order, then the transport groups
+      for (const cid of Object.keys(COUNTRIES)) {
+        const mine = COUNTRY_GROUPS[cid].filter((id) => game.props[id].owner === p.id);
+        if (!mine.length) continue;
         const c = COUNTRIES[cid];
+        const full = game.ownsGroup(p, cid);
         const head = document.createElement("div");
         head.className = "build-group";
-        head.innerHTML = '<i style="background:' + c.color + '"></i>' + c.name +
-          '<em>house &euro;' + tileById(COUNTRY_GROUPS[cid][0]).houseCost + "</em>";
+        head.innerHTML = '<i style="background:' + c.color + '"></i>' + esc(c.name) +
+          "<em>" + mine.length + "/" + COUNTRY_GROUPS[cid].length +
+          (full ? " &middot; house &euro;" + tileById(COUNTRY_GROUPS[cid][0]).houseCost : "") + "</em>";
         list.appendChild(head);
-        for (const tileId of COUNTRY_GROUPS[cid]) {
-          const tile = tileById(tileId);
-          const ps = game.props[tileId];
-          const row = document.createElement("div");
-          row.className = "build-row";
-          const houses = ps.houses >= ECONOMY.maxHouses
-            ? icon("houseSolid", "ic-chip ic-chip--hotel") + " Hotel"
-            : ps.houses > 0
-              ? Array.from({ length: ps.houses },
-                () => icon("houseSolid", "ic-chip ic-chip--house")).join("")
-              : "none";
-          row.innerHTML =
-            '<span class="build-row__color" style="background:' + c.color + '"></span>' +
-            '<span><span class="build-row__name">' + tile.name + '</span><br>' +
-            '<span class="build-row__houses">' + houses + " &middot; rent &euro;" + game.rentFor(tile) + "</span></span>";
-          const minus = document.createElement("button");
-          minus.className = "build-row__btn";
-          minus.innerHTML = icon("x", "ic-btn");
-          minus.disabled = !game.canSellOn(p, tile);
-          minus.onclick = () => UI.sellHandler && UI.sellHandler(tileId);
-          const plus = document.createElement("button");
-          plus.className = "build-row__btn";
-          plus.textContent = "+";
-          plus.disabled = !game.canBuildOn(p, tile);
-          plus.onclick = () => UI.buildHandler && UI.buildHandler(tileId);
-          row.append(minus, plus);
-          list.appendChild(row);
-        }
+        for (const id of mine) list.appendChild(manageRow(game, p, tileById(id), c.color));
+      }
+
+      const others = owned.filter((t) => t.kind !== "city");
+      if (others.length) {
+        const head = document.createElement("div");
+        head.className = "build-group";
+        head.innerHTML = '<i style="background:#4f7d99"></i>Airports &amp; utilities' +
+          "<em>" + others.length + "</em>";
+        list.appendChild(head);
+        for (const t of others) list.appendChild(manageRow(game, p, t, kindColor(t)));
       }
     };
+
     UI._buildRender = render;
     render();
     openModal("#modal-build");
