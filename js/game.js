@@ -370,13 +370,22 @@
         case "utility": {
           const ps = this.props[tile.id];
           if (!ps.owner) {
-            if (p.cash >= tile.price) {
+            /* Always offer it, even when the cash is not there yet. It used to
+             * skip straight past with a "can't afford" line, which robbed the
+             * player of the chance to mortgage or sell something and then buy —
+             * the whole point of holding property. The prompt stays open while
+             * they raise the money and only refuses the purchase if they still
+             * cannot cover it when they commit. */
+            {
               this._changed();
               // movement is already parked here: the pawn stops on the tile and
               // nothing advances until this prompt resolves
               const wants = await this.hooks.promptBuy(p, tile, tile.price);
-              if (wants) {
+              if (wants && p.cash >= tile.price) {
                 this._buy(p, tile);
+              } else if (wants) {
+                this._log("😅", "#f59e0b",
+                  `${p.name} could not cover ${tile.name} (${fmt(tile.price)})`);
               } else if (this.rules.auctions && this.alive().length > 1) {
                 this._log("ban", "#f59e0b", `${p.name} passed — ${tile.name} goes to auction`);
                 await this._runAuction(p, tile);
@@ -384,8 +393,6 @@
                 this._log("ban", "#f59e0b", `${p.name} skipped ${tile.name}`);
                 await wait(500); // brief beat before play resumes
               }
-            } else {
-              this._log("😅", "#f59e0b", `${p.name} can't afford ${tile.name} (${fmt(tile.price)})`);
             }
           } else if (ps.owner === p.id) {
             this._log("🏠", "#22c55e", `${p.name} is home at ${tile.name}`);

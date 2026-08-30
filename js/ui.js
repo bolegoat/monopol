@@ -795,6 +795,9 @@
     UI.setStatus(game);
     UI.refreshButtons(game);
     UI.refreshBuildIfOpen(game);
+    // a pending buy prompt re-checks affordability after any state change, so
+    // mortgaging mid-prompt enables the Buy button without reopening anything
+    if (UI._buyRefresh) UI._buyRefresh();
   };
   /* ================= Modals (Promise-based) ================= */
 
@@ -869,12 +872,39 @@
       }
       $("#buy-name").textContent = tile.name;
       $("#buy-price").innerHTML = "&euro;" + price;
-      $("#buy-rent").textContent = player.name + " \u00b7 cash after purchase: \u20ac" + (player.cash - price);
+
+      /* The prompt now opens even when the money is not there, so it has to
+       * track the balance live: raise cash in the manager on top of this modal
+       * and Buy lights up by itself. Refreshed from UI.sync via _buyRefresh. */
+      const buyBtn = $("#btn-buy");
+      const raiseBtn = $("#btn-buy-raise");
+      const refresh = () => {
+        const short = price - player.cash;
+        const afford = short <= 0;
+        buyBtn.disabled = !afford;
+        $("#buy-rent").textContent = afford
+          ? player.name + " \u00b7 cash after purchase: \u20ac" + (player.cash - price)
+          : player.name + " \u00b7 \u20ac" + player.cash + " in hand, \u20ac" + short + " short";
+        if (raiseBtn) raiseBtn.hidden = afford;
+      };
+      refresh();
+      UI._buyRefresh = refresh;
 
       openModal("#modal-buy");
-      const done = (wants) => { closeModal("#modal-buy"); resolve(wants); };
-      $("#btn-buy").onclick = () => done(true);
+      const done = (wants) => {
+        UI._buyRefresh = null;
+        closeModal("#modal-buy");
+        resolve(wants);
+      };
+      buyBtn.onclick = () => done(true);
       $("#btn-pass").onclick = () => done(false);
+      // opens the property manager over the top; the buy prompt stays pending
+      if (raiseBtn) {
+        raiseBtn.onclick = () => {
+          const g = (window.BT.mp && window.BT.mp.game) || UI.game || window.BT.game;
+          if (g) UI.openBuild(g);
+        };
+      }
     });
   };
 

@@ -1925,6 +1925,10 @@ body {
    Audio settings modal
    ============================================================ */
 
+/* the property manager can be opened on top of the buy prompt while you raise
+   cash, so it has to sit above it in the stack */
+#modal-build { z-index: 125; }
+
 .modal-audio { width: min(430px, 92vw); text-align: left; }
 .modal-audio .modal-title, .modal-audio .modal-note, .modal-audio .modal-card-icon { text-align: center; }
 .modal-audio .modal-card-icon { margin-inline: auto; }
