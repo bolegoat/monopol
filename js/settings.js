@@ -1,9 +1,9 @@
 /* ============================================================================
  * Balkan Tycoon — settings.js
- * Sound & music panel: mute-all toggle plus separate music / effects volume
- * sliders. State lives in BT.Audio (persisted to localStorage); this module
- * is purely the DOM binding, and it keeps the top-bar speaker button in sync
- * with whatever the current mix is.
+ * Sound panel: mute-all toggle plus the effects volume slider. State lives in
+ * BT.Audio (persisted to localStorage); this module is purely the DOM binding,
+ * and it keeps the top-bar speaker button in sync with the current level.
+ * There is no music control because there is no music — see js/sfx.js.
  * ========================================================================== */
 
 "use strict";
@@ -18,8 +18,6 @@
     btnIc: $("#audio-btn-ic"),
     modal: $("#modal-audio"),
     mute: $("#audio-mute"),
-    music: $("#audio-music"),
-    musicVal: $("#audio-music-val"),
     sfx: $("#audio-sfx"),
     sfxVal: $("#audio-sfx-val"),
     test: $("#btn-audio-test"),
@@ -32,18 +30,15 @@
   /** Reflect BT.Audio state onto every control. */
   function render(s) {
     els.mute.checked = s.muted;
-    els.music.value = String(Math.round(s.music * 100));
     els.sfx.value = String(Math.round(s.sfx * 100));
-    els.musicVal.textContent = pct(s.music);
     els.sfxVal.textContent = pct(s.sfx);
-    els.music.disabled = s.muted;
     els.sfx.disabled = s.muted;
     els.modal.querySelectorAll(".audio-row").forEach((row) => row.classList.toggle("is-off", s.muted));
 
-    const silent = s.muted || (s.music <= 0 && s.sfx <= 0);
+    const silent = s.muted || s.sfx <= 0;
     els.btnIc.innerHTML = window.BT.icon(silent ? "volumeMute" : "volume", "icon-btn__svg");
     els.btn.classList.toggle("is-muted", silent);
-    els.btn.title = silent ? "Audio muted — click to open sound settings" : "Sound & music settings";
+    els.btn.title = silent ? "Sound muted — click to open sound settings" : "Sound settings";
   }
 
   Audio.onChange(render);
@@ -51,11 +46,6 @@
   /* ---------- controls ---------- */
 
   els.mute.addEventListener("change", () => Audio.setMuted(els.mute.checked));
-
-  els.music.addEventListener("input", () => {
-    els.musicVal.textContent = pct(Number(els.music.value) / 100);
-    Audio.setMusic(Number(els.music.value) / 100);
-  });
 
   els.sfx.addEventListener("input", () => {
     els.sfxVal.textContent = pct(Number(els.sfx.value) / 100);

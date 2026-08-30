@@ -1036,12 +1036,16 @@ body {
 
 .pl__delta.is-up { color: #5ee08f; }
 .pl__delta.is-down { color: #ff8f8f; }
-.pl__delta.is-live { display: inline-block; animation: delta-in 1.1s ease-out forwards; }
+/* duration comes from ui.js so the chip outlives the rolling balance */
+.pl__delta.is-live {
+  display: inline-block;
+  animation: delta-in var(--delta-ms, 2300ms) ease-out forwards;
+}
 
 @keyframes delta-in {
   0%   { opacity: 0; transform: translateY(5px); }
-  14%  { opacity: 1; transform: translateY(0); }
-  66%  { opacity: 1; transform: translateY(0); }
+  7%   { opacity: 1; transform: translateY(0); }
+  80%  { opacity: 1; transform: translateY(0); }
   100% { opacity: 0; transform: translateY(-5px); }
 }
 

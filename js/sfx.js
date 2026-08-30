@@ -6,12 +6,12 @@
  *
  * Signal chain
  * ────────────
- *   voices ──┬─────────────────────────────► busVol ──┐
- *            └─► send ─► convolver (plate) ─► busVol ─┤
- *                                                     │
- *   music bus ────────────────────────────────────────┤
+ *   voices ──┬─────────────────────────────► sfxVol ──┐
+ *            └─► send ─► convolver (plate) ─► sfxVol ─┤
  *                                                     ▼
  *                        master ─► saturator ─► limiter ─► destination
+ *
+ * Effects only — there is no music bed. See the note above unlock().
  *
  * The saturator is a soft tanh curve and the limiter a fast compressor, so
  * overlapping hits round off instead of clipping — that is most of what makes
@@ -22,7 +22,7 @@
  *
  * Public API
  * ──────────
- *   BT.Audio.settings / setMusic(v) / setSfx(v) / setMuted(b) / toggleMute()
+ *   BT.Audio.settings / setSfx(v) / setMuted(b) / toggleMute()
  *   BT.Audio.onChange(fn) / unlock() / state
  *
  *   ui         click()  open()  close()
@@ -36,6 +36,7 @@
  *
  * Autoplay policy: sound is on by default but nothing is synthesised until the
  * first real gesture, which resumes the context. An explicit mute persists.
+ * Nothing loops or plays unprompted — every sound is tied to a game event.
  * ========================================================================== */
 
 "use strict";
@@ -50,7 +51,7 @@
    * no reason to suspect a speaker button was the cause. Since settings live in
    * localStorage, which is per-origin, unmuting on localhost never carried over
    * to the deployed domain either. */
-  const DEFAULTS = { music: 0.4, sfx: 0.7, muted: false };
+  const DEFAULTS = { sfx: 0.7, muted: false };
 
   /* A minor pentatonic — the whole kit is built from these. */
   const HZ = {
@@ -64,10 +65,8 @@
   const listeners = new Set();
 
   let ctx = null;   // AudioContext | false (unsupported)
-  let master = null, musicVol = null, sfxVol = null;
-  let musicSend = null, sfxSend = null;
-  let ambience = null;
-  let motifTimer = 0;
+  let master = null, sfxVol = null;
+  let sfxSend = null;
   let unlocked = false;
 
   /* ================= settings ================= */
@@ -77,7 +76,8 @@
       const raw = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
       if (!raw || typeof raw !== "object") return { ...DEFAULTS };
       return {
-        music: clamp01(Number(raw.music), DEFAULTS.music),
+        // a stored `music` level from before the music bus was removed is
+        // simply ignored, and drops out of storage on the next save
         sfx: clamp01(Number(raw.sfx), DEFAULTS.sfx),
         // only a stored boolean counts, so a player who deliberately muted stays
         // muted while a partial or legacy record falls back to the default
@@ -181,9 +181,7 @@
       };
 
       const sfxBus = makeBus(0.16, 0.9, 2.6);
-      const musicBus = makeBus(0.5, 2.4, 2.0);
       sfxVol = sfxBus.vol; sfxSend = sfxBus.send;
-      musicVol = musicBus.vol; musicSend = musicBus.send;
 
       applyVolumes(0);
       return ctx;
@@ -202,7 +200,6 @@
       node.gain.linearRampToValueAtTime(value, t + ramp);
     };
     set(master, settings.muted ? 0 : 0.9);
-    set(musicVol, curve(settings.music) * 0.42); // ambience always sits back
     set(sfxVol, curve(settings.sfx) * 0.85);
   }
 
@@ -295,13 +292,11 @@
       p.pan.value = Math.max(-1, Math.min(1, o.pan));
       tail = node.connect(p);
     }
-    const bus = o.bus === "music" ? musicVol : sfxVol;
-    const send = o.bus === "music" ? musicSend : sfxSend;
-    tail.connect(bus);
-    if (o.send && send) {
+    tail.connect(sfxVol);
+    if (o.send && sfxSend) {
       const s = c.createGain();
       s.gain.value = o.send;
-      tail.connect(s).connect(send);
+      tail.connect(s).connect(sfxSend);
     }
   }
 
@@ -374,119 +369,20 @@
     hit({ ...o, filter: "bandpass", freq: (o.freq || 160) * 7, q: 1.4, dur: 0.035, gain: (o.gain || 0.08) * 0.55 });
   }
 
-  /* ================= ambience ================= */
-
-  function startAmbience() {
-    const c = live();
-    if (!c || ambience) return;
-
-    const nodes = [];
-    const bed = c.createGain();
-    bed.gain.value = 0;
-    bed.connect(musicVol);
-    const bedSend = c.createGain();
-    bedSend.gain.value = 0.45;
-    bed.connect(bedSend).connect(musicSend);
-
-    const lp = c.createBiquadFilter();
-    lp.type = "lowpass";
-    lp.frequency.value = 340;
-    lp.Q.value = 0.5;
-    lp.connect(bed);
-
-    // drone stack: root, fifth, octave — quiet, wide, slightly detuned
-    for (const [freq, type, gain, detune] of [
-      [HZ.A1, "sine", 0.5, 0], [HZ.E2, "sine", 0.26, 7],
-      [HZ.A2, "triangle", 0.12, -6], [HZ.E3, "triangle", 0.05, 9],
-    ]) {
-      const osc = c.createOscillator();
-      const g = c.createGain();
-      osc.type = type;
-      osc.frequency.value = freq;
-      osc.detune.value = detune;
-      g.gain.value = gain;
-      osc.connect(g).connect(lp);
-      osc.start();
-      nodes.push(osc, g);
-    }
-
-    // distant traffic
-    const air = c.createBufferSource();
-    air.buffer = noise(c);
-    air.loop = true;
-    const airF = c.createBiquadFilter();
-    airF.type = "bandpass";
-    airF.frequency.value = 430;
-    airF.Q.value = 0.7;
-    const airG = c.createGain();
-    airG.gain.value = 0.035;
-    air.connect(airF).connect(airG).connect(bed);
-    air.start();
-    nodes.push(air, airF, airG);
-
-    // slow breathing on the cutoff
-    const lfo = c.createOscillator();
-    const lfoG = c.createGain();
-    lfo.frequency.value = 0.038;
-    lfoG.gain.value = 130;
-    lfo.connect(lfoG).connect(lp.frequency);
-    lfo.start();
-    nodes.push(lfo, lfoG, lp, bed, bedSend);
-
-    bed.gain.setValueAtTime(0.0001, c.currentTime);
-    bed.gain.exponentialRampToValueAtTime(0.5, c.currentTime + 4);
-
-    ambience = {
-      stop() {
-        const t = c.currentTime;
-        bed.gain.cancelScheduledValues(t);
-        bed.gain.setValueAtTime(bed.gain.value, t);
-        bed.gain.exponentialRampToValueAtTime(0.0001, t + 0.8);
-        setTimeout(() => {
-          for (const n of nodes) {
-            try { n.stop && n.stop(); } catch (e) { /* already stopped */ }
-            try { n.disconnect(); } catch (e) { /* already gone */ }
-          }
-        }, 1000);
-      },
-    };
-
-    // sparse pentatonic motif, drenched in the plate so it floats
-    const SCALE = [HZ.A3, HZ.C4, HZ.D4, HZ.E4, HZ.G4, HZ.A4];
-    clearInterval(motifTimer);
-    motifTimer = setInterval(() => {
-      if (!ambience || settings.muted || !ctx || ctx.state !== "running") return;
-      if (Math.random() < 0.5) return; // leave gaps
-      const t = now();
-      const root = SCALE[Math.floor(Math.random() * SCALE.length)];
-      const pan = rnd(-0.5, 0.5);
-      tone({ t, freq: root, dur: 2.6, type: "triangle", gain: 0.05, atk: 0.05, lp: 1400, pan, send: 0.7, bus: "music" });
-      if (Math.random() < 0.5) {
-        tone({ t: t + 0.42, freq: root * 1.5, dur: 2.2, type: "sine", gain: 0.035, atk: 0.06, pan: -pan, send: 0.8, bus: "music" });
-      }
-    }, 5600);
-  }
-
-  function stopAmbience() {
-    clearInterval(motifTimer);
-    motifTimer = 0;
-    if (!ambience) return;
-    ambience.stop();
-    ambience = null;
-  }
-
-  function syncAmbience() {
-    if (settings.muted || settings.music <= 0) stopAmbience();
-    else if (unlocked) startAmbience();
-  }
-
   /* ================= unlock ================= */
+
+  /* There is deliberately no background music. An earlier version ran a
+   * continuous drone bed (detuned sine/triangle stack, band-passed noise for
+   * "distant traffic", an LFO breathing the filter cutoff) plus a randomised
+   * pentatonic motif every few seconds. Endless, unskippable and fatiguing —
+   * the whole music bus, its reverb send and the motif scheduler are gone
+   * rather than merely defaulted to zero, so nothing can reintroduce it. Sound
+   * effects fire on events and then stop, which is the only audio here now. */
 
   function unlock() {
     unlocked = true;
     const c = ac();
     if (c && c.state === "suspended") void c.resume();
-    syncAmbience();
   }
 
   for (const evt of ["pointerdown", "keydown", "touchstart"]) {
@@ -498,11 +394,6 @@
   const Audio = {
     get settings() { return { ...settings }; },
 
-    setMusic(v) {
-      settings.music = clamp01(Number(v), DEFAULTS.music);
-      save(); applyVolumes(); syncAmbience(); emit();
-    },
-
     setSfx(v) {
       settings.sfx = clamp01(Number(v), DEFAULTS.sfx);
       save(); applyVolumes(); emit();
@@ -511,15 +402,11 @@
     setMuted(muted) {
       settings.muted = Boolean(muted);
       save();
-      if (settings.muted) {
-        applyVolumes();
-        stopAmbience();
-      } else {
+      if (!settings.muted) {
         unlocked = true; // flipping the switch IS a gesture
         ac();
-        applyVolumes();
-        syncAmbience();
       }
+      applyVolumes();
       emit();
     },
 
@@ -539,7 +426,6 @@
       return {
         context: ctx === false ? "unsupported" : ctx ? ctx.state : "not-created",
         unlocked,
-        ambience: Boolean(ambience),
         muted: settings.muted,
       };
     },

@@ -25,7 +25,7 @@
           </div>
           <div class="top-bar-right">
             <button class="icon-btn" id="btn-audio" type="button"
-                    title="Sound &amp; music settings" aria-label="Sound and music settings">
+                    title="Sound settings" aria-label="Sound settings">
               <span class="icon-btn__ic" id="audio-btn-ic" data-icon="volumeMute"></span>
             </button>
             <span class="room-chip" id="room-chip" hidden></span>
@@ -419,26 +419,18 @@
 
       <!-- incoming trades render as slide-in cards in #trade-dock (see ui.js) -->
 
-      <!-- sound & music settings -->
+      <!-- sound settings -->
       <div class="modal-overlay" id="modal-audio" hidden>
         <div class="modal modal-audio">
           <div class="modal-card-icon" data-icon="volume"></div>
-          <h2 class="modal-title">Sound &amp; Music</h2>
-          <p class="modal-note">Audio starts muted — browsers block sound until you ask for it.</p>
+          <h2 class="modal-title">Sound</h2>
+          <p class="modal-note">Effects only — no background music. Sound starts on the first click.</p>
 
           <label class="switch-row">
-            <span class="switch-txt"><b>Mute everything</b><small>Silences the ambience and all effects</small></span>
+            <span class="switch-txt"><b>Mute everything</b><small>Silences every sound effect</small></span>
             <input type="checkbox" id="audio-mute" />
             <i class="knob" aria-hidden="true"></i>
           </label>
-
-          <div class="audio-row">
-            <span class="audio-row__ic" data-icon="music"></span>
-            <span class="audio-row__lbl">Music</span>
-            <input type="range" class="audio-slider" id="audio-music" min="0" max="100" step="1" value="45"
-                   aria-label="Music volume" />
-            <b class="audio-row__val" id="audio-music-val">45%</b>
-          </div>
 
           <div class="audio-row">
             <span class="audio-row__ic" data-icon="volume"></span>

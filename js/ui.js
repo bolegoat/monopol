@@ -504,6 +504,38 @@
 
   UI._rows = new Map();
 
+  /* ---------------------------------------------------------------------------
+   * Money pacing
+   *
+   * A payment used to land in 420ms with an easeOutCubic, which front-loads the
+   * movement: most of the change happened in the first fifth of an already short
+   * animation, so a rent payment was over before you could look up and see whose
+   * balance moved. Two changes fix that:
+   *
+   *   - the duration scales with the amount, so €20 stays brisk while a €900
+   *     rent takes long enough to follow, instead of one fixed tempo for both
+   *   - the easing is in-out rather than out, so the digits tick steadily
+   *     through the middle of the roll rather than blurring past
+   *
+   * The +/- chip also holds long enough to actually be read, and its CSS
+   * animation length is driven from here so the two cannot drift apart.
+   * ------------------------------------------------------------------------ */
+
+  const CASH_ROLL_MIN_MS = 650;   // a small fee
+  const CASH_ROLL_MAX_MS = 1700;  // a ruinous rent
+  const CASH_ROLL_REF = 1000;     // amount that earns the full duration
+  const DELTA_HOLD_MS = 2300;
+
+  function rollDuration(diff) {
+    const a = Math.abs(diff);
+    // log scale: mid-sized sums should not feel sluggish just because a huge
+    // one exists, so €100 sits nearer the fast end than a linear ramp gives
+    const k = Math.min(1, Math.log10(1 + a / 25) / Math.log10(1 + CASH_ROLL_REF / 25));
+    return Math.round(CASH_ROLL_MIN_MS + (CASH_ROLL_MAX_MS - CASH_ROLL_MIN_MS) * k);
+  }
+
+  const easeInOutQuad = (k) => (k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2);
+
   /** Roll a cash figure from its current value to the new one. */
   function rollCash(row, to) {
     const from = row.shown;
@@ -515,11 +547,10 @@
     }
     cancelAnimationFrame(row.raf);
     const t0 = performance.now();
-    const dur = 420;
+    const dur = rollDuration(to - from);
     const step = (now) => {
       const k = Math.min(1, (now - t0) / dur);
-      const e = 1 - Math.pow(1 - k, 3);
-      row.cash.textContent = money(from + (to - from) * e);
+      row.cash.textContent = money(from + (to - from) * easeInOutQuad(k));
       if (k < 1) row.raf = requestAnimationFrame(step);
     };
     row.raf = requestAnimationFrame(step);
@@ -530,10 +561,13 @@
     const el = row.delta;
     el.textContent = (amount > 0 ? "+" : "\u2212") + money(Math.abs(amount));
     el.className = "pl__delta " + (amount > 0 ? "is-up" : "is-down");
+    // keep the chip up for at least as long as the figure is still moving
+    const hold = Math.max(DELTA_HOLD_MS, rollDuration(amount) + 700);
+    el.style.setProperty("--delta-ms", hold + "ms");
     void el.offsetWidth; // restart
     el.classList.add("is-live");
     clearTimeout(row.deltaTimer);
-    row.deltaTimer = setTimeout(() => el.classList.remove("is-live"), 1100);
+    row.deltaTimer = setTimeout(() => el.classList.remove("is-live"), hold);
   }
 
   UI.renderPlayers = function (game) {
