@@ -396,6 +396,20 @@
         }
       }
     }
+    /* The kafana pot on the board. Taxes vanishing into a pot and reappearing
+     * in someone's balance turns later is invisible bookkeeping otherwise —
+     * you could not see the prize sitting there, or that it existed at all. */
+    const kaf = UI.tileParts.get("kafana");
+    if (kaf) {
+      const sub = kaf.el.querySelector(".tile__sub");
+      const pot = game.rules.kafanaJackpot ? (game.kafanaPot || 0) : 0;
+      if (sub) {
+        const txt = pot > 0 ? "Pot " + money(pot) : "Free parking";
+        if (sub.textContent !== txt) sub.textContent = txt;
+      }
+      kaf.el.classList.toggle("has-pot", pot > 0);
+    }
+
     // keep the 3D houses/hotels overlay in step with engine state
     if (window.BT.Buildings) window.BT.Buildings.sync(game);
   };
