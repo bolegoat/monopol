@@ -21,6 +21,11 @@
   const DOT = "\u00b7";
   const euro = (n) => EURO + n;
 
+  /* Player names come from a lobby text field and land in innerHTML below, so
+   * they have to be escaped rather than trusted. */
+  const esc = (s) =>
+    String(s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+
   /* ---------- helpers ---------- */
 
   function icon(name, cls) {
@@ -94,9 +99,33 @@
    * lot with one red piece. Current rent sits on the right, because that is
    * the number the development is really telling you about.
    */
+  /** Which pawns are standing on this tile right now. */
+  function whoIsHere(g, tile) {
+    if (!g) return "";
+    const idx = window.BT.tileIndex(tile.id);
+    const here = g.players.filter((p) => !p.bankrupt && p.position === idx);
+    if (!here.length) return "";
+    return '<div class="deed__here">' +
+      '<span class="deed__here-lbl">Standing here</span>' +
+      here.map((p) =>
+        '<span class="deed__who"><span class="deed__token" style="background:' + p.color + '">' +
+        face(p) + "</span>" + esc(p.name) + "</span>").join("") +
+      "</div>";
+  }
+
   function devStrip(g, tile) {
     const ps = g && g.props[tile.id];
     if (!ps || !ps.owner) return "";
+
+    // a mortgaged deed earns nothing, so development is moot until it is cleared
+    if (ps.mortgaged) {
+      return '<div class="deed__dev is-hocked">' +
+        '<span class="deed__pieces">' + icon("banknote", "ic-pc") + "</span>" +
+        '<span class="deed__devtx">Mortgaged &mdash; collects no rent</span>' +
+        '<b class="deed__devrent">buy back ' + euro(g.unmortgageCost(tile)) + "</b>" +
+        "</div>";
+    }
+
     const max = ECONOMY.maxHouses;
     const built = ps.houses || 0;
     const piece = (cls) => '<i class="deed__pc deed__pc--' + cls + '">' +
@@ -159,13 +188,13 @@
       html +=
         '<div class="deed__live">' +
           '<span class="deed__token" style="background:' + p.color + '">' + face(p) + "</span>" +
-          "Owned by <strong>" + p.name + "</strong> " + DOT + " " +
+          "Owned by <strong>" + esc(p.name) + "</strong> " + DOT + " " +
           (owned === total
             ? "holds all of " + c.name
             : owned + " of " + total + " " + c.short + " cities") +
         "</div>";
     }
-    return html;
+    return html + whoIsHere(g, tile);
   }
 
   function airportDeed(tile) {
@@ -197,11 +226,11 @@
       html +=
         '<div class="deed__live">' +
           '<span class="deed__token" style="background:' + p.color + '">' + face(p) + "</span>" +
-          "Owned by <strong>" + p.name + "</strong>" + DOT + " currently " +
+          "Owned by <strong>" + esc(p.name) + "</strong>" + DOT + " currently " +
           count + " airport" + (count > 1 ? "s" : "") +
         "</div>";
     }
-    return html;
+    return html + whoIsHere(g, tile);
   }
 
   function utilityDeed(tile) {
@@ -237,11 +266,11 @@
       html +=
         '<div class="deed__live">' +
           '<span class="deed__token" style="background:' + p.color + '">' + face(p) + "</span>" +
-          "Owned by <strong>" + p.name + "</strong>" + DOT + " currently " +
+          "Owned by <strong>" + esc(p.name) + "</strong>" + DOT + " currently " +
           (both ? "both utilities" : "one utility") +
         "</div>";
     }
-    return html;
+    return html + whoIsHere(g, tile);
   }
 
   function contentFor(tile) {

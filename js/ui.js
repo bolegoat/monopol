@@ -337,12 +337,19 @@
     // rent is in the signature because a neighbour changing hands can move
     // this tile's rent (airport ladder, utility multiplier, set bonus)
     const tag = owner ? plateTags(game).get(owner.id) || "" : "";
-    const sig = owner ? owner.id + "|" + owner.color + "|" + tag + "|" + rent + "|" + (mono ? 1 : 0) : "";
+    const hocked = Boolean(owner && ps.mortgaged);
+    const sig = owner
+      ? owner.id + "|" + owner.color + "|" + tag + "|" + rent + "|" + (mono ? 1 : 0) + (hocked ? "|m" : "")
+      : "";
     if (parts.ownSig === sig) return;
     parts.ownSig = sig;
 
     el.classList.toggle("is-owned", Boolean(owner));
     el.classList.toggle("is-monopoly", mono);
+    // a mortgaged plot is still owned but earns nothing, and that has to be
+    // visible on the board itself — otherwise you have to open the manager to
+    // find out why landing on someone's city cost you nothing
+    el.classList.toggle("is-hocked", hocked);
 
     if (owner) {
       el.style.setProperty("--oc", owner.color);

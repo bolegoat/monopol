@@ -1,5 +1,5 @@
 /* ============================================================================
- * Balkan Tycoon — styles.css
+ * Balkan Tycoon ï¿½ styles.css
  * Zero-overflow viewport lock, 11x11 CSS grid board with reference-style
  * flag-header cards, SVG icon system, players + log side panel.
  * ========================================================================== */
@@ -33,7 +33,7 @@
 }
 
 /* The UA's [hidden] rule loses to any author `display`, so every component
- * that sets display (.btn, .turn-timer, .trade-card…) would ignore the hidden
+ * that sets display (.btn, .turn-timer, .trade-cardï¿½) would ignore the hidden
  * attribute. Re-assert it once, globally, instead of per component. */
 [hidden] { display: none !important; }
 
@@ -234,7 +234,7 @@ body {
 .tile-top .tile__card { flex-direction: column-reverse; }
 .tile-top .tile__group { top: 0; bottom: auto; }
 /* the top row is inverted, so the owner plate flips edge and grow direction
-   (its lit side flips too — see .tile-top.is-owned in the ownership section) */
+   (its lit side flips too ï¿½ see .tile-top.is-owned in the ownership section) */
 .tile-top .tile__owner { top: auto; bottom: 0; transform-origin: bottom center; }
 
 /* hover: group-color glow + lift toward the board center */
@@ -253,7 +253,7 @@ body {
 /* ---------- ownership, layer 1: wash + ring ----------
  * The wash falls from the center-facing edge and the ring outlines the whole
  * plot, both in the owner's seat color. This is the layer you read without
- * looking directly at the tile — it answers "taken or free?" at a glance,
+ * looking directly at the tile ï¿½ it answers "taken or free?" at a glance,
  * before you focus enough to read the plate or the rent. A completed country
  * pushes the ring to full opacity and adds an inner glow. */
 .tile__tint {
@@ -362,7 +362,7 @@ body {
 
 /* ---------- ownership, layer 3: live rent ----------
  * On an owned plot the price is history, so the pill switches to what landing
- * there costs now — houses, set bonus and airport ladder included. Kept on a
+ * there costs now ï¿½ houses, set bonus and airport ladder included. Kept on a
  * dark ground with the number in the owner's color: a third solid color block
  * next to the plate and the ring would be noise, and the digits have to stay
  * readable at 12px. The "R" prefix is there so rent can never be misread as
@@ -446,10 +446,32 @@ body {
 
 /* inverted top row: light the plate from below instead, so every plate on the
    board looks lit from the same direction on screen. Must follow the rule
-   above — same specificity, so source order decides. */
+   above ï¿½ same specificity, so source order decides. */
 .tile-top.is-owned .tile__owner {
   background-image: linear-gradient(0deg, rgba(255, 255, 255, 0.24), rgba(0, 0, 0, 0.18));
   box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.4), 0 -2px 8px var(--oc-55, transparent);
+}
+
+/* ---------- mortgaged: owned, but earning nothing ----------
+   Read as a plot with the lights off: the seat colour drains out of the plate
+   and a diagonal hatch crosses the card, so it is obvious at board distance
+   why landing here was free. */
+.tile.is-hocked .tile__owner {
+  background-image: repeating-linear-gradient(135deg,
+    rgba(0, 0, 0, 0.42) 0 3px, rgba(255, 255, 255, 0.14) 3px 6px);
+  filter: saturate(0.35) brightness(0.8);
+}
+
+.tile.is-hocked .tile__tint {
+  opacity: 0.55;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.14);
+}
+
+.tile.is-hocked .tile__price--rent {
+  color: var(--muted);
+  border-color: rgba(255, 255, 255, 0.14);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
 }
 
 /* crown only once the whole country is theirs */
@@ -780,7 +802,7 @@ body {
    a seat-coloured rule down the left, name on the baseline,
    money right-aligned in tabular figures, and two hairline
    meters (net worth, turn clock) pinned to the bottom edge.
-   No cards, no glow, no shadows — just rules and rhythm.
+   No cards, no glow, no shadows ï¿½ just rules and rhythm.
    ============================================================ */
 
 .ic-chip { width: 9px; height: 9px; color: var(--green); }
@@ -1381,7 +1403,7 @@ body {
   letter-spacing: 0.02em;
 }
 
-/* a mortgaged deed is still yours but earns nothing — read it as dimmed */
+/* a mortgaged deed is still yours but earns nothing ï¿½ read it as dimmed */
 .build-row.is-mortgaged { opacity: 0.72; }
 .build-row.is-mortgaged .build-row__color { filter: grayscale(0.75); }
 
@@ -1462,7 +1484,7 @@ body {
 
 /* Native dropdowns draw their popup with the UA's own palette. The closed
    control inherited our near-white text, but the popup kept a white
-   background — so every option was white on white and unreadable. color-scheme
+   background ï¿½ so every option was white on white and unreadable. color-scheme
    asks the UA to render the whole widget dark; the explicit option colours
    cover engines that ignore it. */
 .select,
@@ -1613,7 +1635,7 @@ body {
 }
 
 /* ============================================================
-   Property deed hover tooltip (deed.js) — strictly emoji-free:
+   Property deed hover tooltip (deed.js) ï¿½ strictly emoji-free:
    clean typography, SVG icons and CSS badges only.
    ============================================================ */
 
@@ -1806,6 +1828,26 @@ body {
 }
 
 .deed__devtx { flex: 1 1 auto; }
+
+.deed__dev.is-hocked .deed__pieces { color: var(--gold); opacity: 0.85; }
+.deed__dev.is-hocked .deed__devrent { color: var(--muted); font-weight: 700; }
+
+/* who is standing on this tile â€” the card described the plot but never said
+   which pawns were actually on it */
+.deed__here {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.deed__here-lbl { text-transform: uppercase; letter-spacing: 0.08em; font-size: 9.5px; }
+.deed__who { display: inline-flex; align-items: center; gap: 4px; color: #e8ecf3; font-weight: 700; }
+.deed__who .deed__token { width: 14px; height: 14px; }
 .deed__devrent { color: var(--gold); font-variant-numeric: tabular-nums; font-weight: 700; }
 
 .deed__live {
@@ -1835,7 +1877,7 @@ body {
 .deed__token .ic-deed { width: 10px; height: 10px; }
 
 /* ============================================================
-   Player palette — seat colors as first-class design tokens.
+   Player palette ï¿½ seat colors as first-class design tokens.
    The lobby assigns these from js/tokens.js PLAYER_COLORS; every
    roster row also gets --pc inline so components can tint
    themselves from the live roster instead of a fixed index.
@@ -1868,7 +1910,7 @@ body {
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease, transform 120ms ease;
 }
 
-/* reachable while the pre-game menu overlay (z 120) is up — unmuting is the
+/* reachable while the pre-game menu overlay (z 120) is up ï¿½ unmuting is the
    first thing a player wants to do, before the match even starts */
 #btn-audio { position: relative; z-index: 130; }
 #modal-audio { z-index: 140; }
@@ -1961,7 +2003,7 @@ body {
 .stage-badge.offline { background: rgba(245, 158, 11, 0.16); color: #fbbf24; }
 
 /* ============================================================
-   LEFT DOCK — incoming trade cards + collapsible session log
+   LEFT DOCK ï¿½ incoming trade cards + collapsible session log
    ============================================================ */
 
 .left-dock {
@@ -2465,7 +2507,7 @@ body {
 @keyframes reconnect-pulse { 50% { opacity: 0.5; } }
 
 /* ============================================================
-   The prison (corner tile) — a barred cell leaning toward the
+   The prison (corner tile) ï¿½ a barred cell leaning toward the
    board centre plus a visiting yard on the outer edge.
 
    Two layers draw the same box:
@@ -2569,7 +2611,7 @@ body {
 /* Front set: the .jail-front grid item, above the pawn layer. */
 .jail-front {
   position: relative;
-  z-index: 8; /* pawn-layer is 7 — prisoners end up behind these bars */
+  z-index: 8; /* pawn-layer is 7 ï¿½ prisoners end up behind these bars */
   pointer-events: none;
 }
 
@@ -2606,7 +2648,7 @@ body {
 .tile--at-br .jail__yard { align-items: flex-end; justify-content: flex-end; }
 .tile--at-bl .jail__yard { align-items: flex-end; justify-content: flex-start; }
 
-/* Printed on the board like the real thing — tokens stand on top of it. */
+/* Printed on the board like the real thing ï¿½ tokens stand on top of it. */
 .jail__tag {
   display: inline-flex;
   align-items: center;
