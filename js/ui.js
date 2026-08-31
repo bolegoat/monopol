@@ -19,6 +19,45 @@
     game: null,
   };
 
+  /**
+   * Whose hands are on this keyboard.
+   *
+   * Online that is the seat token; in a local hot-seat game everybody shares one
+   * screen, so "me" is simply whoever is on turn. Every affordance on the board
+   * (is this my plot? may I build here?) keys off this one answer rather than
+   * each caller re-deriving it and getting it subtly wrong.
+   */
+  UI.localPlayerId = function (game) {
+    if (window.BT.myPlayerId) return window.BT.myPlayerId;
+    return game && game.current ? game.current.id : null;
+  };
+
+  /** The player object this client is acting for, or null. */
+  UI.me = function (game) {
+    const id = UI.localPlayerId(game);
+    return id && game ? game.player(id) : null;
+  };
+
+  /** Is it my move? (Always true in hot-seat.) */
+  UI.myTurn = function (game) {
+    if (!game || !game.current) return false;
+    return !window.BT.myPlayerId || window.BT.myPlayerId === game.current.id;
+  };
+
+  /**
+   * May this client change its own deeds right now? Building outside your turn
+   * is a house rule; when it is off you may still act during your own turn, and
+   * always while you are settling a debt — that prompt exists precisely so you
+   * can raise cash.
+   */
+  UI.canManage = function (game) {
+    const me = UI.me(game);
+    if (!game || !me || me.bankrupt || game.phase === "over") return false;
+    if (me.debtAmount > 0) return true;
+    if (game.rules && game.rules.buildAnytime) return true;
+    return UI.myTurn(game);
+  };
+
   const badge = (color, style, cls) =>
     window.BT.Tokens.badge(color, style, cls || "");
 
@@ -78,11 +117,15 @@
    * initials are left alone, because "Z" on Zagreb beats "3".
    */
   function plateTags(game) {
-    let tags = tagCache.get(game);
-    if (tags) return tags;
+    if (!game.players || !game.players.length) return new Map();
+    // key the cache on the actual names: players can rename mid-match, and a
+    // cache keyed on the game alone pinned the tag they joined with forever
+    const key = game.players.map((p) => p.id + ":" + p.name).join("|");
+    const hit = tagCache.get(game);
+    if (hit && hit.key === key) return hit.tags;
+    let tags;
     // never cache an empty roster: a snapshot could arrive mid-hydration and
     // we would pin blank tags for the rest of the match
-    if (!game.players || !game.players.length) return new Map();
     const seen = new Map();
     for (const p of game.players) {
       const i = initialOf(p.name);
@@ -93,7 +136,7 @@
       const i = initialOf(p.name);
       tags.set(p.id, seen.get(i) > 1 ? String((p.seat || 0) + 1) : i);
     }
-    tagCache.set(game, tags);
+    tagCache.set(game, { key, tags });
     return tags;
   }
 
@@ -119,6 +162,22 @@
     );
   }
 
+  /* The ownership chip rides INSIDE the footer, on the same row as the flag
+   * badge and the price. It used to be a full-width band pinned across the
+   * outer rim, which sat on top of both of them and forced the footer to pad
+   * itself out of the way — so on every owned city the flag was half-covered. */
+  const ownerChip = () =>
+    '<span class="tile__owner">' +
+      '<span class="tile__crown" aria-hidden="true">' + icon("crown") + "</span>" +
+      '<span class="tile__ownertag"></span>' +
+    "</span>";
+
+  /* Plain-language stamp for a mortgaged plot. Whether a deed is hocked changes
+   * what landing on it costs, so it belongs on the board, not three clicks deep
+   * in a manager. */
+  const mortgageStamp = () =>
+    '<div class="tile__mtg" aria-hidden="true"><b>' + icon("banknote") + "Mortgaged</b></div>";
+
   function tileInnerHTML(tile) {
     const price = '<span class="tile__price">&euro;' + tile.price + "</span>";
     switch (tile.kind) {
@@ -129,10 +188,12 @@
           "</div>" +
           '<div class="tile__body"><span class="tile__name">' + tile.name + "</span></div>" +
           '<div class="tile__footer">' +
+            ownerChip() +
             '<span class="tile__flagbadge" style="' + flagBg(tile.country) + '"></span>' +
             price +
           "</div>" +
-          '<div class="tile__group" style="background:' + COUNTRIES[tile.country].color + '"></div>');
+          '<div class="tile__group" style="background:' + COUNTRIES[tile.country].color + '"></div>' +
+          mortgageStamp());
       case "airport":
       case "utility": {
         const ic = tile.kind === "airport" ? "plane" : tile.id === "balkan-electric" ? "zap" : "bottle";
@@ -140,8 +201,9 @@
           '<div class="tile__figure" data-banner>' + icon(ic) + "</div>" +
           // short board label where one exists; the full name lives on the deed
           '<div class="tile__body"><span class="tile__name">' + esc(tile.label || tile.name) + "</span></div>" +
-          '<div class="tile__footer">' + price + "</div>" +
-          '<div class="tile__group" style="background:' + kindColor(tile) + '"></div>');
+          '<div class="tile__footer">' + ownerChip() + price + "</div>" +
+          '<div class="tile__group" style="background:' + kindColor(tile) + '"></div>' +
+          mortgageStamp());
       }
       case "surprise":
         return (
@@ -219,19 +281,13 @@
       // group color for the hover glow (set as custom props)
       el.style.setProperty("--gc-55", hexA(kindColor(tile), 0.5));
       // inward-facing card: content + strips rotate/invert per edge via CSS.
-      // Only buyable tiles get an ownership plate — a corner or a tax square
-      // can never change hands, so it would be dead markup on 12 of 40 tiles.
-      const buyable = tile.kind === "city" || tile.kind === "airport" || tile.kind === "utility";
+      // The ownership chip is built by tileInnerHTML, inside the footer, so only
+      // buyable tiles carry one — a corner or a tax square can never change
+      // hands and would be dead markup on 12 of 40 tiles.
       el.innerHTML =
         '<div class="tile__card">' +
           tileInnerHTML(tile) +
           '<div class="tile__tint"></div>' +
-          (buyable
-            ? '<div class="tile__owner">' +
-                '<span class="tile__crown" aria-hidden="true">' + icon("crown") + "</span>" +
-                '<span class="tile__ownertag"></span>' +
-              "</div>"
-            : "") +
         "</div>";
 
       board.appendChild(el);
@@ -338,14 +394,24 @@
     // this tile's rent (airport ladder, utility multiplier, set bonus)
     const tag = owner ? plateTags(game).get(owner.id) || "" : "";
     const hocked = Boolean(owner && ps.mortgaged);
+    const me = UI.localPlayerId(game);
+    const mine = Boolean(owner && me && owner.id === me);
+    // can I do something with this plot right now? drives the board affordance
+    const can = mine && (
+      game.canBuildOn(owner, tile) || game.canSellOn(owner, tile) ||
+      game.canMortgage(owner, tile) || game.canUnmortgage(owner, tile) ||
+      game.canSellField(owner, tile));
     const sig = owner
-      ? owner.id + "|" + owner.color + "|" + tag + "|" + rent + "|" + (mono ? 1 : 0) + (hocked ? "|m" : "")
+      ? owner.id + "|" + owner.color + "|" + tag + "|" + rent + "|" + (mono ? 1 : 0) +
+        (hocked ? "|m" : "") + (mine ? "|me" : "") + (can ? "|c" : "")
       : "";
     if (parts.ownSig === sig) return;
     parts.ownSig = sig;
 
     el.classList.toggle("is-owned", Boolean(owner));
     el.classList.toggle("is-monopoly", mono);
+    el.classList.toggle("is-mine", mine);
+    el.classList.toggle("is-actionable", can);
     // a mortgaged plot is still owned but earns nothing, and that has to be
     // visible on the board itself — otherwise you have to open the manager to
     // find out why landing on someone's city cost you nothing
@@ -396,18 +462,28 @@
         }
       }
     }
-    /* The kafana pot on the board. Taxes vanishing into a pot and reappearing
-     * in someone's balance turns later is invisible bookkeeping otherwise —
-     * you could not see the prize sitting there, or that it existed at all. */
+    /* The kafana pot, on the tile it will be won from AND on the HUD next to
+     * the log. Taxes vanishing into a pot and reappearing in someone's balance
+     * turns later is invisible bookkeeping otherwise — you could not see the
+     * prize sitting there, or that it existed at all. */
+    const jackpot = Boolean(game.rules && game.rules.kafanaJackpot);
+    const pot = jackpot ? (game.kafanaPot || 0) : 0;
     const kaf = UI.tileParts.get("kafana");
     if (kaf) {
       const sub = kaf.el.querySelector(".tile__sub");
-      const pot = game.rules.kafanaJackpot ? (game.kafanaPot || 0) : 0;
       if (sub) {
-        const txt = pot > 0 ? "Pot " + money(pot) : "Free parking";
+        const txt = !jackpot ? "Free parking"
+          : pot > 0 ? "POT " + money(pot)
+          : "Pot empty";
         if (sub.textContent !== txt) sub.textContent = txt;
       }
       kaf.el.classList.toggle("has-pot", pot > 0);
+    }
+    const potChip = $("#hud-pot");
+    if (potChip) {
+      potChip.hidden = !jackpot;
+      const val = $("#hud-pot-val");
+      if (val) val.textContent = money(pot);
     }
 
     // keep the 3D houses/hotels overlay in step with engine state
@@ -721,20 +797,56 @@
 
   /* ================= Status chrome ================= */
 
+  /* ---------------------------------------------------------------------------
+   * Whose turn it is
+   *
+   * This used to be a small grey pill tucked into the top bar next to the room
+   * code, which is the one place on screen nobody looks at while playing. It is
+   * now the first row of the centre HUD: the seat token at full size, the name
+   * at headline weight, a seat-coloured rail down the edge and, when the table
+   * is waiting on you, a slow glow on the whole banner. You should be able to
+   * tell whose move it is from the other side of the room.
+   * ------------------------------------------------------------------------ */
+
   UI.setTurnChip = function (game) {
-    const chip = $("#turn-chip");
-    if (!game || game.phase === "over") return;
+    const box = $("#hud-turn");
+    if (!box || !game || !game.current) return;
     const p = game.current;
-    const mine = !window.BT.myPlayerId || window.BT.myPlayerId === p.id;
-    chip.classList.toggle("is-mine", mine);
-    chip.style.setProperty("--pc", p.color);
-    chip.innerHTML =
-      '<i class="turn-chip__dot"></i>' +
-      "<strong>" + esc(p.name) + "</strong>" +
-      '<span class="turn-chip__round">R' + game.round + "</span>";
+    const mine = UI.myTurn(game);
+    const over = game.phase === "over";
+
+    box.classList.toggle("is-mine", mine && !over);
+    box.style.setProperty("--pc", p.color);
+    box.style.setProperty("--pc-14", hexA(p.color, 0.14));
+    box.style.setProperty("--pc-50", hexA(p.color, 0.5));
+    box.style.setProperty("--pc-55", hexA(p.color, 0.55));
+
+    const seat = $("#hud-turn-seat");
+    const seatSig = p.id + "|" + p.color + "|" + p.tokenStyle;
+    if (seat && seat.dataset.sig !== seatSig) {
+      seat.dataset.sig = seatSig;
+      seat.innerHTML = badge(p.color, p.tokenStyle);
+    }
+
+    const name = $("#hud-turn-name");
+    if (name) name.textContent = over ? "Match over" : p.name;
+
+    const sub = $("#hud-turn-sub");
+    if (sub) {
+      sub.textContent = over ? "final standings"
+        : mine ? "your turn"
+        : "their turn — waiting";
+    }
+
+    const round = $("#hud-round");
+    if (round) {
+      round.hidden = over;
+      round.textContent = "R" + game.round +
+        (game.config && game.config.maxRounds ? "/" + game.config.maxRounds : "");
+    }
 
     // a soft cue the first time a turn becomes yours
-    if (mine && UI._turnCueFor !== p.id + ":" + game.round && game.phase === "awaiting-roll") {
+    if (mine && !over && UI._turnCueFor !== p.id + ":" + game.round && game.phase === "awaiting-roll") {
       UI._turnCueFor = p.id + ":" + game.round;
       window.BT.sfx && window.BT.sfx.turn();
     }
@@ -746,51 +858,71 @@
 
   UI.setStatus = function (game) {
     const el = $("#action-status");
+    if (!el) return;
     const p = game.current;
-    const mine = !window.BT.myPlayerId || window.BT.myPlayerId === p.id;
-    if (!mine && game.phase !== "over") {
-      el.innerHTML = "Waiting for <strong>" + p.name + "</strong>&hellip;";
+    const me = UI.me(game);
+    if (me && me.debtAmount > 0) {
+      el.innerHTML = "You are <strong>&euro;" + me.debtAmount +
+        "</strong> short — raise it or concede";
+      return;
+    }
+    if (game.phase === "settling") {
+      const debtor = game.players.find((x) => x.debtAmount > 0);
+      el.innerHTML = debtor
+        ? "Waiting for <strong>" + esc(debtor.name) + "</strong> to settle a debt&hellip;"
+        : "Settling&hellip;";
+      return;
+    }
+    if (!UI.myTurn(game) && game.phase !== "over") {
+      el.innerHTML = "Waiting for <strong>" + esc(p.name) + "</strong>&hellip;";
       return;
     }
     switch (game.phase) {
       case "awaiting-roll":
-        el.innerHTML = "<strong>" + p.name + "</strong> — roll the dice";
+        el.innerHTML = "Roll the dice to move";
         break;
       case "awaiting-jail-roll":
-        el.innerHTML = "<strong>" + p.name + "</strong> is in prison — roll for doubles";
+        el.innerHTML = "In prison — roll for doubles to get out";
         break;
       case "busy":
-        el.innerHTML = "<strong>" + p.name + "</strong> is on the move&hellip;";
+        el.innerHTML = "<strong>" + esc(p.name) + "</strong> is on the move&hellip;";
         break;
       case "turn-end":
-        el.innerHTML = "<strong>" + p.name + "</strong> — build or end the turn";
+        el.innerHTML = "Build, trade, or end your turn";
         break;
       case "over":
-        el.innerHTML = "Game over";
+        el.innerHTML = "Match over";
         break;
+      default:
+        el.innerHTML = "";
     }
   };
 
   UI.refreshButtons = function (game) {
     const phase = game.phase;
-    const mine = !window.BT.myPlayerId || window.BT.myPlayerId === game.current.id;
-    $("#btn-roll").disabled = !mine || !(phase === "awaiting-roll" || phase === "awaiting-jail-roll");
-    $("#btn-roll").innerHTML =
-      '<span class="btn-ic">' + icon("dice") + "</span>" +
-      (phase === "awaiting-jail-roll" ? "Roll Doubles" : "Roll Dice") +
-      '<kbd class="btn-kbd">R</kbd>';
-    $("#btn-end-turn").disabled = !mine || phase !== "turn-end";
-    // the property manager is not just for building: mortgaging, buying deeds
-    // back and selling off are all done here, so it opens whenever you own
-    // anything at all on your own turn — not only with a full set in hand
-    const canManage =
-      (phase === "awaiting-roll" || phase === "turn-end") &&
-      game.ownedTiles(game.current).length > 0;
-    $("#btn-build").disabled = !mine || !canManage;
+    const mine = UI.myTurn(game);
+    const me = UI.me(game);
+    const stuck = Boolean(me && me.debtAmount > 0);
+
+    const roll = $("#btn-roll");
+    roll.disabled = stuck || !mine || !(phase === "awaiting-roll" || phase === "awaiting-jail-roll");
+    const label = $("#btn-roll-label");
+    if (label) label.textContent = phase === "awaiting-jail-roll" ? "Roll Doubles" : "Roll Dice";
+
+    $("#btn-end-turn").disabled = stuck || !mine || phase !== "turn-end";
+
+    // Trading is not turn-locked: a deal is a conversation, and forcing everyone
+    // to wait for their own turn to even open the composer killed half of them.
     $("#btn-trade").disabled =
-      phase === "over" ||
-      game.current.bankrupt ||
+      phase === "over" || !me || me.bankrupt ||
       game.players.filter((p) => !p.bankrupt).length < 2;
+
+    // Deeds: build, mortgage, buy back, sell off. Enabled whenever this client
+    // holds anything it is allowed to touch right now.
+    const assets = $("#btn-assets");
+    if (assets) {
+      assets.disabled = !me || !UI.canManage(game) || game.ownedTiles(me).length === 0;
+    }
   };
 
   UI.showLastRoll = function (d1, d2) {
@@ -803,35 +935,71 @@
 
   /** One place to repaint everything from engine state. */
   UI.sync = function (game) {
+    if (!game) return;
+    UI.game = UI.game || game;
     UI.renderPlayers(game);
     UI.renderTiles(game);
     UI.setTurnChip(game);
     UI.setStatus(game);
     UI.refreshButtons(game);
     UI.refreshBuildIfOpen(game);
+    UI.refreshInspect(game);
     // a pending buy prompt re-checks affordability after any state change, so
     // mortgaging mid-prompt enables the Buy button without reopening anything
     if (UI._buyRefresh) UI._buyRefresh();
     if (UI._debtRefresh) UI._debtRefresh();
+    UI.checkOwnDebt(game);
   };
 
   UI.settleHandler = null;
   UI.bankruptHandler = null;
 
   /**
+   * Online, the debt lives in synced state rather than in a prompt promise, so
+   * each client raises its own settle window when the roster says it owes
+   * something. That also means it survives a reload or a reconnect mid-debt.
+   */
+  UI.checkOwnDebt = function (game) {
+    if (!window.BT.mpActive || !window.BT.myPlayerId) return;
+    const mine = game.player(window.BT.myPlayerId);
+    if (mine && mine.debtAmount > 0 && !UI._debtRefresh) UI.openDebt(game, mine);
+  };
+
+  /**
+   * Re-resolve a player from the live engine by id.
+   *
+   * Guests rebuild their whole roster from each snapshot (`applySnapshot` maps
+   * every player into a fresh object), so any UI that captured a player object
+   * when a prompt opened is holding a corpse: its `cash` never moves again. That
+   * is what made the settle prompt refuse to unlock — a player could sell half
+   * their portfolio, watch their balance climb in the ledger, and still be told
+   * they were short, with no way out but bankruptcy.
+   */
+  function liveOf(game, playerish) {
+    const id = playerish && playerish.id;
+    return (id && game && game.player(id)) || playerish;
+  }
+
+  /**
    * Mandatory settle prompt. Deliberately has no dismiss: the engine has
    * stopped in the `settling` phase and will not advance until this is
    * answered, so an escape hatch would just wedge the game.
    */
-  UI.openDebt = function (game, player) {
-    UI._debtPlayer = player;
+  UI.openDebt = function (game, playerRef) {
+    UI._debtPlayerId = playerRef && playerRef.id;
+    UI._debtPlayer = playerRef;
     const refresh = () => {
-      const d = game.debtOf(player);
+      // always work from the live roster, never the object this closed over
+      const g = (window.BT.mp && window.BT.mp.game) || UI.game || window.BT.game || game;
+      const player = liveOf(g, { id: UI._debtPlayerId }) || playerRef;
+      UI._debtPlayer = player;
+      const d = (player.bankrupt ? null : g.debtOf(player));
       if (!d) { // settled or conceded — the prompt has done its job
         UI._debtRefresh = null;
         closeModal("#modal-debt");
         return;
       }
+      game = g;
       const short = d.amount - player.cash;
       $("#debt-amount").innerHTML = "\u20ac" + d.amount;
       $("#debt-who").textContent = d.to ? "owed to " + d.to.name : "owed to the bank";
@@ -842,6 +1010,7 @@
       $("#btn-debt-pay").disabled = short > 0;
       // no way out: say so rather than letting them hunt for a button
       $("#btn-debt-raise").disabled = game.raisableCash(player) <= 0;
+      UI.renderRaiseList(game, "#debt-raise-list");
     };
     refresh();
     UI._debtRefresh = refresh;
@@ -928,15 +1097,24 @@
        * track the balance live: raise cash in the manager on top of this modal
        * and Buy lights up by itself. Refreshed from UI.sync via _buyRefresh. */
       const buyBtn = $("#btn-buy");
-      const raiseBtn = $("#btn-buy-raise");
+      const raiseBox = $("#buy-raise-box");
       const refresh = () => {
-        const short = price - player.cash;
+        const g = (window.BT.mp && window.BT.mp.game) || UI.game || window.BT.game;
+        const live = g ? g.player(player.id) : player;
+        const cash = live ? live.cash : player.cash;
+        const short = price - cash;
         const afford = short <= 0;
         buyBtn.disabled = !afford;
         $("#buy-rent").textContent = afford
-          ? player.name + " \u00b7 cash after purchase: \u20ac" + (player.cash - price)
-          : player.name + " \u00b7 \u20ac" + player.cash + " in hand, \u20ac" + short + " short";
-        if (raiseBtn) raiseBtn.hidden = afford;
+          ? player.name + " \u00b7 cash after purchase: \u20ac" + (cash - price)
+          : player.name + " \u00b7 \u20ac" + cash + " in hand, \u20ac" + short + " short";
+        /* Short of the price? The deeds you could raise it against go right in
+         * the prompt. The plot is not going anywhere while you decide, so
+         * "can't afford it" should never be the end of the conversation. */
+        if (raiseBox) {
+          raiseBox.hidden = afford;
+          if (!afford && g) UI.renderRaiseList(g, "#buy-raise-list");
+        }
       };
       refresh();
       UI._buyRefresh = refresh;
@@ -949,13 +1127,6 @@
       };
       buyBtn.onclick = () => done(true);
       $("#btn-pass").onclick = () => done(false);
-      // opens the property manager over the top; the buy prompt stays pending
-      if (raiseBtn) {
-        raiseBtn.onclick = () => {
-          const g = (window.BT.mp && window.BT.mp.game) || UI.game || window.BT.game;
-          if (g) UI.openBuild(g);
-        };
-      }
     });
   };
 
@@ -1057,11 +1228,15 @@
 
   UI.jailChoice = function (player) {
     return new Promise((resolve) => {
+      const g = (window.BT.mp && window.BT.mp.game) || UI.game || window.BT.game;
+      const bail = g && g.config ? g.config.jailFee : ECONOMY.jailFee;
       $("#jail-note").textContent =
         player.name + " is in prison (attempt " + (player.jailTurns + 1) + " of 3). " +
-        "Roll doubles, pay \u20ac" + ECONOMY.jailFee + " bail" +
+        "Roll doubles, pay \u20ac" + bail + " bail" +
         (player.getOutCards > 0 ? " or use your card" : "") + ".";
-      $("#btn-jail-pay").disabled = player.cash < ECONOMY.jailFee;
+      const pay = $("#btn-jail-pay");
+      pay.textContent = bail > 0 ? "Pay \u20ac" + bail + " bail" : "Walk out free";
+      pay.disabled = player.cash < bail;
       $("#btn-jail-card").hidden = player.getOutCards < 1;
       openModal("#modal-jail");
       const done = (choice) => { closeModal("#modal-jail"); resolve(choice); };
@@ -1092,6 +1267,7 @@
 
   function manageRow(game, p, tile, swatch) {
     const ps = game.props[tile.id];
+    const allow = UI.canManage(game);
     const row = document.createElement("div");
     row.className = "build-row" + (ps.mortgaged ? " is-mortgaged" : "");
 
@@ -1112,12 +1288,13 @@
       "</span></span>";
 
     const btn = (label, title, enabled, fn, cls) => {
+      const ok = enabled && allow;
       const b = document.createElement("button");
       b.className = "build-row__btn" + (cls ? " " + cls : "");
       b.innerHTML = label;
-      b.title = title;
-      b.disabled = !enabled;
-      if (enabled) b.onclick = fn;
+      b.title = allow ? title : title + " — not right now";
+      b.disabled = !ok;
+      if (ok) b.onclick = fn;
       return b;
     };
 
@@ -1157,8 +1334,12 @@
     UI._buildGame = game;
 
     const render = () => {
-      const p = game.current;
+      /* MY deeds, not the deeds of whoever happens to be on turn. This read
+       * game.current, which online meant a guest opening the sheet was shown
+       * somebody else's portfolio and every button in it was dead. */
+      const p = UI.me(game);
       list.innerHTML = "";
+      if (!p) return;
       const owned = game.ownedTiles(p);
       if (!owned.length) {
         list.innerHTML = '<p class="modal-note" style="text-align:center">You do not own anything yet.</p>';
@@ -1203,6 +1384,98 @@
     UI._buildRender();
   };
 
+  /** Re-render the docked property inspector (deed.js owns the markup). */
+  UI.refreshInspect = function () {
+    if (window.BT.Deed) window.BT.Deed.refresh();
+  };
+
+  /* ---------------------------------------------------------------------------
+   * "Raise cash" list
+   *
+   * Inlined into the two prompts that a shortfall can block: the buy prompt and
+   * the settle-debt prompt. Nothing is ever sold on a player's behalf, so every
+   * prompt that can be blocked by a lack of money has to carry the means to fix
+   * it — otherwise "you are €40 short" is a dead end and the only way out is
+   * bankruptcy.
+   * ------------------------------------------------------------------------ */
+
+  UI.renderRaiseList = function (game, listSel) {
+    const list = $(listSel);
+    if (!list) return 0;
+    const p = UI.me(game);
+    list.innerHTML = "";
+    if (!p) return 0;
+    const owned = game.ownedTiles(p);
+    if (!owned.length) {
+      list.innerHTML = '<p class="raise-none">You hold no deeds to raise cash against.</p>';
+      return 0;
+    }
+
+    let actionable = 0;
+    /* Only ever offers actions that RAISE money. Buying a deed back deliberately
+     * has no place here: it costs cash, and having it sit next to "mortgage" in a
+     * panel headed "raise cash" turned the two into a toggle you could bounce
+     * between while getting steadily poorer. It lives in the property inspector,
+     * where spending is the point. */
+    const mini = (act, tileId, label, ic, enabled, title) => {
+      const b = document.createElement("button");
+      b.className = "build-row__btn";
+      b.innerHTML = window.BT.icon(ic, "ic-btn") + label;
+      b.title = title;
+      b.disabled = !enabled;
+      if (enabled) {
+        actionable += 1;
+        b.onclick = () => {
+          const map = {
+            sell: UI.sellHandler,
+            mortgage: UI.mortgageHandler,
+            "sell-field": UI.sellFieldHandler,
+          };
+          const fn = map[act];
+          if (typeof fn === "function") fn(tileId);
+        };
+      }
+      return b;
+    };
+
+    const eur = (n) => "\u20ac" + n;
+    for (const t of owned) {
+      const ps = game.props[t.id];
+      const row = document.createElement("div");
+      row.className = "raise-row";
+      const swatch = t.kind === "city" ? COUNTRIES[t.country].color : kindColor(t);
+      row.innerHTML =
+        '<span class="raise-row__c" style="background:' + swatch + '"></span>' +
+        '<span class="raise-row__n">' + esc(t.name) +
+          "<small>" + (ps.mortgaged ? "mortgaged \u2014 nothing left to raise" :
+            ps.houses >= ECONOMY.maxHouses ? "hotel" :
+            ps.houses ? ps.houses + (ps.houses > 1 ? " houses" : " house") : "undeveloped") +
+          "</small></span>";
+      const acts = document.createElement("span");
+      acts.className = "raise-row__acts";
+      // only offer to sell a house where a house actually stands: a greyed-out
+      // "+€15" against an empty plot reads as a broken button, not a rule
+      if (t.kind === "city" && (ps.houses || 0) > 0) {
+        const gain = Math.round(t.houseCost * ECONOMY.sellRate);
+        acts.appendChild(mini("sell", t.id, "House +" + eur(gain), "minus",
+          game.canSellOn(p, t), "Sell a house back to the bank for " + eur(gain)));
+      }
+      if (game.rules.mortgages && !ps.mortgaged) {
+        const gain = Math.round(t.price * ECONOMY.mortgageRate);
+        acts.appendChild(mini("mortgage", t.id, "Hock +" + eur(gain), "banknote",
+          game.canMortgage(p, t),
+          "Mortgage the deed for " + eur(gain) + " — you keep the plot, it earns nothing"));
+      }
+      const sale = Math.round(t.price * ECONOMY.sellRate);
+      acts.appendChild(mini("sell-field", t.id, "Sell +" + eur(sale), "coins",
+        game.canSellField(p, t),
+        "Sell the deed back to the bank for " + eur(sale) + " — you lose the plot"));
+      row.appendChild(acts);
+      list.appendChild(row);
+    }
+    return actionable;
+  };
+
   UI.showGameOver = function (winner, reason) {
     $("#gameover-title").textContent = winner ? winner.name + " wins!" : "Game over";
     $("#gameover-text").textContent = winner
@@ -1212,33 +1485,57 @@
   };
   /* ================= Multiplayer: lobby / timer / trade ================= */
 
+  /** The joinable URL for a room code, safe to paste anywhere. */
+  UI.inviteUrl = function (code) {
+    if (!code) return "";
+    return location.origin + location.pathname + "?room=" + encodeURIComponent(code);
+  };
+
+  /**
+   * Room chip in the top bar. Copies the full invite LINK, not just the code —
+   * telling a friend to open a site and type five characters is a step nobody
+   * should have to relay over voice chat.
+   */
   UI.setRoomChip = function (code) {
-    const chip = $("#room-chip");
+    const chip = $("#invite-chip");
+    if (!chip) return;
     if (!code) { chip.hidden = true; delete chip.dataset.code; return; }
     chip.hidden = false;
     chip.dataset.code = code;
     chip.classList.remove("is-reconnecting");
-    chip.textContent = code;
-    chip.title = "Room code — click to copy";
+    const codeEl = $("#invite-code");
+    if (codeEl) codeEl.textContent = code;
+    chip.title = "Copy the invite link for room " + code;
     chip.onclick = () => {
-      navigator.clipboard && navigator.clipboard.writeText(code).catch(() => {});
-      chip.textContent = "Copied";
-      setTimeout(() => { chip.textContent = code; }, 900);
+      const url = UI.inviteUrl(code);
+      const done = () => {
+        chip.classList.add("is-copied");
+        const hint = chip.querySelector(".invite-chip__hint");
+        if (hint) hint.textContent = "link copied";
+        setTimeout(() => {
+          chip.classList.remove("is-copied");
+          if (hint) hint.textContent = "copy invite";
+        }, 1400);
+      };
+      if (navigator.clipboard) navigator.clipboard.writeText(url).then(done, done);
+      else done();
     };
   };
 
   /** Transport state: flips the room chip into a "reconnecting" pill. */
   UI.setConnState = function (online) {
-    const chip = $("#room-chip");
+    const chip = $("#invite-chip");
     if (!chip) return;
+    const hint = chip.querySelector(".invite-chip__hint");
     if (online) {
       chip.classList.remove("is-reconnecting");
-      if (chip.dataset.code) chip.textContent = chip.dataset.code;
+      if (hint) hint.textContent = "copy invite";
       return;
     }
+    if (!chip.dataset.code) return;
     chip.hidden = false;
     chip.classList.add("is-reconnecting");
-    chip.textContent = "Reconnecting\u2026";
+    if (hint) hint.textContent = "reconnecting\u2026";
   };
 
   /**
@@ -1274,23 +1571,35 @@
 
   /* ---------- trade composer: balances + money sliders ---------- */
 
+  /* ---------------------------------------------------------------------------
+   * Trade composer
+   *
+   * Two changes worth knowing about:
+   *
+   *   - The "trade with" control is no longer a native <select>. A native
+   *     dropdown draws its popup with the platform palette, so our near-white
+   *     text landed on the UA's white popup and every name was invisible. It is
+   *     now a row of seat-coloured chips carrying the token and the balance,
+   *     which cannot be restyled out from under us and reads better anyway.
+   *   - Every listener is assigned with .onX rather than addEventListener. The
+   *     old version added a fresh set on every open, so by the fourth trade of a
+   *     match each keystroke ran four handlers and the sliders fought them.
+   * ------------------------------------------------------------------------ */
+
   UI.openTrade = function (game, myId, opts) {
     const me = game.player(myId);
     const others = game.players.filter((p) => p.id !== myId && !p.bankrupt);
     if (!me || !others.length) return;
     const prefill = opts.prefill || {};
-    const prefillTo = opts.prefillTo;
 
-    const targetSel = $("#trade-target");
-    targetSel.innerHTML = others
-      .map((p) => '<option value="' + p.id + '"' + (p.id === prefillTo ? " selected" : "") + ">" +
-        p.name + " \u00b7 \u20ac" + p.cash + "</option>")
-      .join("");
+    let toId = others.some((p) => p.id === opts.prefillTo) ? opts.prefillTo : others[0].id;
+    const target = () => game.player(toId);
 
     const giveCash = $("#trade-give-cash");
     const wantCash = $("#trade-want-cash");
     const giveSlider = $("#trade-give-slider");
     const wantSlider = $("#trade-want-slider");
+    const warn = $("#trade-warn");
     giveCash.value = prefill.giveCash || 0;
     wantCash.value = prefill.wantCash || 0;
 
@@ -1298,25 +1607,51 @@
     const wantSet = new Set(prefill.wantTiles || []);
     const filters = { give: "", want: "" };
 
-    const syncSliders = () => {
-      giveCash.max = me.cash;
-      giveSlider.max = me.cash;
-      giveSlider.value = Math.min(Number(giveCash.value) || 0, me.cash);
-      const target = game.player(targetSel.value);
-      const theirMax = target ? target.cash : 0;
-      wantCash.max = theirMax;
-      wantSlider.max = theirMax;
-      wantSlider.value = Math.min(Number(wantCash.value) || 0, theirMax);
-    const tokenHtml = (p) => window.BT.Tokens.badge(
+    const tokenOf = (p) => badge(
       p.color,
       Number.isFinite(p.tokenStyle) ? p.tokenStyle : window.BT.Tokens.hashStyle(p.name || "?"),
     );
-    $("#trade-me-token").outerHTML = tokenHtml(me).replace("class=", 'id="trade-me-token" class=');
-    $("#trade-them-token").outerHTML = tokenHtml(target || { color: "#555" })
-      .replace("class=", 'id="trade-them-token" class=');
+
+    /* --- the party picker --- */
+    const renderPicker = () => {
+      const box = $("#trade-target-pick");
+      if (!box) return;
+      box.innerHTML = "";
+      for (const p of others) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "party-opt" + (p.id === toId ? " is-active" : "");
+        b.style.setProperty("--po", p.color);
+        b.setAttribute("role", "radio");
+        b.setAttribute("aria-checked", p.id === toId ? "true" : "false");
+        b.innerHTML = tokenOf(p) + "<span>" + esc(p.name) + "</span><em>\u20ac" + p.cash + "</em>";
+        b.onclick = () => {
+          if (toId === p.id) return;
+          toId = p.id;
+          wantCash.value = 0;
+          wantSet.clear();
+          renderPicker();
+          syncHeads();
+          renderColumns();
+          validate();
+        };
+        box.appendChild(b);
+      }
+    };
+
+    const syncHeads = () => {
+      const t = target();
+      giveCash.max = me.cash;
+      giveSlider.max = me.cash;
+      giveSlider.value = Math.min(Number(giveCash.value) || 0, me.cash);
+      const theirMax = t ? t.cash : 0;
+      wantCash.max = theirMax;
+      wantSlider.max = theirMax;
+      wantSlider.value = Math.min(Number(wantCash.value) || 0, theirMax);
+      const tok = $("#trade-me-token");
+      if (tok) tok.innerHTML = tokenOf(me);
       $("#trade-me-name").textContent = me.name;
       $("#trade-me-cash").innerHTML = "&euro;" + me.cash;
-      $("#trade-them-cash").innerHTML = target ? "&euro;" + target.cash : "";
     };
 
     /** Quick-cash steppers: +10 / +50 / +100 / Max, clamped to balance. */
@@ -1324,21 +1659,23 @@
       const row = document.querySelector('.stepper-row[data-stepper-for="' + which + '"]');
       if (!row) return;
       const input = which === "give" ? giveCash : wantCash;
-      const cap = () => (which === "give" ? me.cash : (game.player(targetSel.value) || { cash: 0 }).cash);
+      const slider = which === "give" ? giveSlider : wantSlider;
+      const cap = () => (which === "give" ? me.cash : (target() || { cash: 0 }).cash);
       row.querySelectorAll(".step-btn").forEach((b) => {
         b.onclick = () => {
           const cur = Math.floor(Number(input.value) || 0);
           input.value = b.hasAttribute("data-max")
             ? cap()
             : Math.min(cap(), cur + Number(b.dataset.add));
-          const slider = which === "give" ? giveSlider : wantSlider;
           slider.value = Math.min(Number(input.value), Number(slider.max) || 0);
+          validate();
         };
       });
     };
 
     const propRow = (tile, set) => {
       const isCity = tile.kind === "city";
+      const ps = game.props[tile.id];
       const lead = isCity
         ? '<i class="tp-flag" style="' + flagBg(tile.country) + '"></i>'
         : '<i class="tp-dot" style="background:' + kindColor(tile) + '"></i>';
@@ -1347,7 +1684,7 @@
       row.className = "trade-prop" + (set.has(tile.id) ? " is-selected" : "");
       row.dataset.name = tile.name.toLowerCase();
       row.innerHTML =
-        lead + "<span>" + tile.name + "</span>" + tag +
+        lead + "<span>" + esc(tile.name) + (ps.mortgaged ? " (mortgaged)" : "") + "</span>" + tag +
         (set.has(tile.id) ? icon("check", "ic-pick") : "") +
         '<span class="trade-prop__price">&euro;' + tile.price + "</span>";
       row.onclick = () => {
@@ -1356,84 +1693,86 @@
         const pick = row.querySelector(".ic-pick");
         if (pick) pick.remove();
         if (set.has(tile.id)) row.insertAdjacentHTML("beforeend", icon("check", "ic-pick"));
+        validate();
       };
       return row;
     };
 
     const renderColumns = () => {
-      const target = game.player(targetSel.value);
+      const t = target();
       const giveBox = $("#trade-give-props");
       const wantBox = $("#trade-want-props");
       giveBox.innerHTML = "";
       wantBox.innerHTML = "";
-      const mine = game.ownedTiles(me).filter((t) => game.props[t.id].houses === 0)
-        .filter((t) => t.name.toLowerCase().includes(filters.give));
-      const theirs = target
-        ? game.ownedTiles(target).filter((t) => game.props[t.id].houses === 0)
-          .filter((t) => t.name.toLowerCase().includes(filters.want))
-        : [];
-      if (!mine.length) giveBox.innerHTML = '<p class="trade-none">No tradable properties</p>';
-      if (!theirs.length) wantBox.innerHTML = '<p class="trade-none">No tradable properties</p>';
-      for (const t of mine) giveBox.appendChild(propRow(t, giveSet));
-      for (const t of theirs) wantBox.appendChild(propRow(t, wantSet));
+      // a developed plot cannot change hands: sell the houses down first
+      const tradable = (p) => game.ownedTiles(p).filter((x) => game.props[x.id].houses === 0);
+      const mine = tradable(me).filter((x) => x.name.toLowerCase().includes(filters.give));
+      const theirs = t ? tradable(t).filter((x) => x.name.toLowerCase().includes(filters.want)) : [];
+      if (!mine.length) giveBox.innerHTML = '<p class="trade-none">Nothing tradable (sell houses first)</p>';
+      if (!theirs.length) wantBox.innerHTML = '<p class="trade-none">Nothing tradable</p>';
+      for (const x of mine) giveBox.appendChild(propRow(x, giveSet));
+      for (const x of theirs) wantBox.appendChild(propRow(x, wantSet));
     };
 
-    // two-way money binding: number input <-> slider, clamped to balance
-    giveCash.addEventListener("input", () => {
-      giveCash.value = Math.min(Math.max(0, Math.floor(Number(giveCash.value) || 0)), me.cash);
-      giveSlider.value = giveCash.value;
-    });
-    giveSlider.addEventListener("input", () => { giveCash.value = giveSlider.value; });
-    wantCash.addEventListener("input", () => {
-      const target = game.player(targetSel.value);
-      wantCash.value = Math.min(Math.max(0, Math.floor(Number(wantCash.value) || 0)), target ? target.cash : 0);
-      wantSlider.value = wantCash.value;
-    });
-    wantSlider.addEventListener("input", () => { wantCash.value = wantSlider.value; });
-    targetSel.onchange = () => {
-      wantCash.value = 0;
-      giveSet.clear();
-      wantSet.clear();
-      syncSliders();
-      renderColumns();
-    };
-
-    giveCash.addEventListener("input", () => { // keep slider in sync when steppers change cash
-      giveSlider.value = Math.min(Number(giveCash.value) || 0, me.cash);
-    });
-    wantCash.addEventListener("input", () => {
-      const target = game.player(targetSel.value);
-      wantSlider.value = Math.min(Number(wantCash.value) || 0, target ? target.cash : 0);
-    });
-    $("#trade-give-filter").addEventListener("input", (e) => {
-      filters.give = e.target.value.trim().toLowerCase();
-      renderColumns();
-    });
-    $("#trade-want-filter").addEventListener("input", (e) => {
-      filters.want = e.target.value.trim().toLowerCase();
-      renderColumns();
-    });
-
-    syncSliders();
-    renderColumns();
-    wireSteppers("give");
-    wireSteppers("want");
-    openModal("#modal-trade");
-    $("#btn-trade-cancel").onclick = () => closeModal("#modal-trade");
-    $("#btn-trade-send").onclick = () => {
-      const trade = {
-        to: targetSel.value,
-        giveCash: Math.max(0, Math.floor(Number(giveCash.value) || 0)),
-        wantCash: Math.max(0, Math.floor(Number(wantCash.value) || 0)),
+    /** Read the composer, clamped. */
+    const readTrade = () => {
+      const t = target();
+      return {
+        to: toId,
+        giveCash: Math.min(Math.max(0, Math.floor(Number(giveCash.value) || 0)), me.cash),
+        wantCash: Math.min(Math.max(0, Math.floor(Number(wantCash.value) || 0)), t ? t.cash : 0),
         giveTiles: [...giveSet],
         wantTiles: [...wantSet],
       };
-      if (trade.giveCash > me.cash) trade.giveCash = me.cash;
-      const target = game.player(trade.to);
-      if (target && trade.wantCash > target.cash) trade.wantCash = target.cash;
-      if (!trade.giveCash && !trade.wantCash && !trade.giveTiles.length && !trade.wantTiles.length) return;
+    };
+
+    /** Say up front why an offer cannot be sent instead of silently ignoring it. */
+    const validate = () => {
+      const trade = readTrade();
+      const empty = !trade.giveCash && !trade.wantCash &&
+        !trade.giveTiles.length && !trade.wantTiles.length;
+      let msg = "";
+      if (empty) msg = "Put something on the table first.";
+      else if (!game.validateTrade({ ...trade, from: myId })) msg = "That offer is not legal any more — balances or deeds changed.";
+      if (warn) { warn.hidden = !msg; warn.textContent = msg; }
+      $("#btn-trade-send").disabled = Boolean(msg);
+      return !msg;
+    };
+
+    // two-way money binding: number input <-> slider, clamped to balance
+    giveCash.oninput = () => {
+      giveCash.value = Math.min(Math.max(0, Math.floor(Number(giveCash.value) || 0)), me.cash);
+      giveSlider.value = giveCash.value;
+      validate();
+    };
+    giveSlider.oninput = () => { giveCash.value = giveSlider.value; validate(); };
+    wantCash.oninput = () => {
+      const t = target();
+      wantCash.value = Math.min(Math.max(0, Math.floor(Number(wantCash.value) || 0)), t ? t.cash : 0);
+      wantSlider.value = wantCash.value;
+      validate();
+    };
+    wantSlider.oninput = () => { wantCash.value = wantSlider.value; validate(); };
+
+    const giveFilter = $("#trade-give-filter");
+    const wantFilter = $("#trade-want-filter");
+    giveFilter.value = "";
+    wantFilter.value = "";
+    giveFilter.oninput = (e) => { filters.give = e.target.value.trim().toLowerCase(); renderColumns(); };
+    wantFilter.oninput = (e) => { filters.want = e.target.value.trim().toLowerCase(); renderColumns(); };
+
+    renderPicker();
+    syncHeads();
+    renderColumns();
+    wireSteppers("give");
+    wireSteppers("want");
+    validate();
+    openModal("#modal-trade");
+    $("#btn-trade-cancel").onclick = () => closeModal("#modal-trade");
+    $("#btn-trade-send").onclick = () => {
+      if (!validate()) return;
       closeModal("#modal-trade");
-      opts.onSend(trade);
+      opts.onSend(readTrade());
     };
   };
 
@@ -1454,6 +1793,22 @@
   let tradeSeq = 0;
 
   const tradeDock = () => $("#trade-dock");
+
+  /**
+   * The left column only takes up space when it has something in it. Because it
+   * is a real flex column rather than a floating overlay, an empty one would sit
+   * there pushing the board sideways for no reason.
+   */
+  UI.syncDock = function () {
+    const dock = $("#left-dock");
+    if (!dock) return;
+    const cards = tradeDock() ? tradeDock().children.length : 0;
+    const slog = $("#session-log");
+    const hasLog = slog && !slog.hidden;
+    dock.classList.toggle("is-empty", cards === 0 && !hasLog);
+    // the board is sized from its container, so it has to re-measure
+    if (UI.measureCells) requestAnimationFrame(() => UI.measureCells());
+  };
 
   function assetTag(kind) {
     const t = ASSET_TAGS[kind] || ASSET_TAGS.city;
@@ -1511,54 +1866,94 @@
   }
 
   /**
-   * Show an incoming offer as a dock card.
+   * Show a trade offer as a dock card.
+   *
+   * Every seat at the table gets one. A deal reshapes the board for everybody,
+   * so an offer that only two people could see meant the rest of the table
+   * discovered a monopoly had been assembled after the fact. The two parties get
+   * buttons — the target can accept, decline or counter, the sender can withdraw
+   * — and everyone else gets the same card with a "watching" line instead.
+   *
    * @param {object} game engine (or hydrated view)
    * @param {object} trade { giveCash, giveTiles, wantCash, wantTiles, from?, to? }
    * @param {string} fromName sender display name
-   * @param {{onAccept:Function, onDecline:Function, onCounter?:Function}} handlers
-   * @param {{fromId?:string}} [meta]
+   * @param {{onAccept?:Function, onDecline?:Function, onCounter?:Function, onWithdraw?:Function}} handlers
+   * @param {{fromId?:string, toId?:string, tradeId?:string, role?:"target"|"sender"|"watch"}} [meta]
    * @returns {string} card id (pass to UI.dismissTrade)
    */
   UI.incomingTrade = function (game, trade, fromName, handlers, meta) {
     const dock = tradeDock();
     if (!dock) return "";
-    const id = "tc" + ++tradeSeq;
-    const fromId = (meta && meta.fromId) || trade.from || null;
+    const m = meta || {};
+    const id = m.tradeId || ("tc" + ++tradeSeq);
+    if (dock.querySelector('[data-trade-id="' + id + '"]')) return id; // idempotent
+    const fromId = m.fromId || trade.from || null;
+    const toId = m.toId || trade.to || null;
+    const role = m.role || "target";
     const sender = fromId && game ? game.player(fromId) : null;
-    const me = game ? game.player(window.BT.myPlayerId) : null;
+    const receiver = toId && game ? game.player(toId) : null;
+    const me = game ? game.player(UI.localPlayerId(game)) : null;
 
     const card = document.createElement("article");
-    card.className = "trade-card";
+    card.className = "trade-card" + (role === "watch" ? " is-spectator" : "");
     card.dataset.tradeId = id;
     if (fromId) card.dataset.fromId = fromId;
-    if (sender) {
-      card.style.setProperty("--pc", sender.color);
-      card.style.setProperty("--pc-45", hexA(sender.color, 0.45));
+    if (toId) card.dataset.toId = toId;
+    const tint = sender || receiver;
+    if (tint) {
+      card.style.setProperty("--pc", tint.color);
+      card.style.setProperty("--pc-45", hexA(tint.color, 0.45));
+    }
+
+    /* Column headings are written from the reader's point of view, which is not
+     * the same sentence for all three roles. */
+    const headline =
+      role === "target" ? "<b>" + esc(fromName) + "</b> sends you:"
+        : role === "sender" ? "You offered <b>" + esc(receiver ? receiver.name : "them") + "</b>:"
+        : "<b>" + esc(fromName) + "</b> &rarr; <b>" + esc(receiver ? receiver.name : "?") + "</b>";
+
+    const getTitle = role === "target" ? "You receive" : (receiver ? esc(receiver.name) + " gets" : "They get");
+    const giveTitle = role === "target" ? "You give" : (sender ? esc(sender.name) + " gets" : "They give");
+
+    let footer;
+    if (role === "target") {
+      footer =
+        '<footer class="tc-actions">' +
+          '<button class="tc-btn tc-btn--ok" type="button" data-act="accept">' +
+            icon("check", "ic-tag") + "Accept</button>" +
+          (handlers.onCounter
+            ? '<button class="tc-btn tc-btn--alt" type="button" data-act="counter" title="Counter-offer">' +
+              icon("exchange", "ic-tag") + "</button>"
+            : "") +
+          '<button class="tc-btn tc-btn--no" type="button" data-act="decline">' +
+            icon("x", "ic-tag") + "Decline</button>" +
+        "</footer>";
+    } else if (role === "sender") {
+      footer =
+        '<footer class="tc-actions">' +
+          '<button class="tc-btn tc-btn--no" type="button" data-act="withdraw">' +
+            icon("trash", "ic-tag") + "Withdraw offer</button>" +
+        "</footer>";
+    } else {
+      footer = '<div class="tc-watch">' + icon("eye") + "waiting on " +
+        esc(receiver ? receiver.name : "them") + "</div>";
     }
 
     card.innerHTML =
       '<header class="tc-head">' +
         (sender ? badge(sender.color, sender.tokenStyle, "tc-avatar") : icon("users", "tc-avatar-ic")) +
-        '<span class="tc-from"><b>' + esc(fromName) + "</b> sends you:</span>" +
+        '<span class="tc-from">' + headline + "</span>" +
+        (role === "target" ? '<span class="tc-me">FOR YOU</span>' : "") +
         '<span class="tc-badge">' + icon("exchange", "ic-tag") + "Trade</span>" +
       "</header>" +
       '<div class="tc-cols">' +
-        tradeColumn("get", "You receive", trade.giveCash, trade.giveTiles) +
-        tradeColumn("give", "You give", trade.wantCash, trade.wantTiles) +
+        tradeColumn("get", getTitle, trade.giveCash, trade.giveTiles) +
+        tradeColumn("give", giveTitle, trade.wantCash, trade.wantTiles) +
       "</div>" +
-      '<footer class="tc-actions">' +
-        '<button class="tc-btn tc-btn--ok" type="button" data-act="accept">' +
-          icon("check", "ic-tag") + "Accept</button>" +
-        (handlers.onCounter
-          ? '<button class="tc-btn tc-btn--alt" type="button" data-act="counter" title="Counter-offer">' +
-            icon("exchange", "ic-tag") + "</button>"
-          : "") +
-        '<button class="tc-btn tc-btn--no" type="button" data-act="decline">' +
-          icon("x", "ic-tag") + "Decline</button>" +
-      "</footer>" +
+      footer +
       '<div class="tc-inv" hidden>' +
         invGrid(game, sender, trade.giveTiles, "get") +
-        invGrid(game, me, trade.wantTiles, "give") +
+        invGrid(game, role === "target" ? me : receiver, trade.wantTiles, "give") +
       "</div>";
 
     dock.prepend(card);
@@ -1583,21 +1978,26 @@
       if (typeof fn === "function") fn();
     };
 
-    card.querySelector('[data-act="accept"]').onclick = () => finish(handlers.onAccept, "deal");
-    card.querySelector('[data-act="decline"]').onclick = () => finish(handlers.onDecline, "decline");
-    const counterBtn = card.querySelector('[data-act="counter"]');
-    if (counterBtn) counterBtn.onclick = () => finish(handlers.onCounter, null);
+    const wire = (act, fn, sound) => {
+      const b = card.querySelector('[data-act="' + act + '"]');
+      if (b) b.onclick = () => finish(fn, sound);
+    };
+    wire("accept", handlers.onAccept, "deal");
+    wire("decline", handlers.onDecline, "decline");
+    wire("counter", handlers.onCounter, null);
+    wire("withdraw", handlers.onWithdraw, "decline");
 
-    window.BT.sfx && window.BT.sfx.receive();
+    if (role === "target") window.BT.sfx && window.BT.sfx.receive();
     dock.classList.remove("is-pinged");
     void dock.offsetWidth;
     dock.classList.add("is-pinged");
+    UI.syncDock();
     return id;
   };
 
   function closeTradeCard(card) {
     card.classList.add("is-out");
-    setTimeout(() => card.remove(), 260);
+    setTimeout(() => { card.remove(); UI.syncDock(); }, 260);
   }
 
   /** Drop a specific offer card (stale trade, sender left, host applied it). */
@@ -1606,12 +2006,13 @@
     if (card && !card.dataset.done) { card.dataset.done = "1"; closeTradeCard(card); }
   };
 
-  /** Drop every pending offer from one player (they disconnected / went bankrupt). */
+  /** Drop every pending offer involving one player (dropped / bankrupt). */
   UI.dismissTradesFrom = function (playerId) {
     const dock = tradeDock();
     if (!dock) return 0;
-    const cards = [...dock.querySelectorAll('[data-from-id="' + String(playerId) + '"]')]
-      .filter((c) => !c.dataset.done);
+    const id = String(playerId);
+    const cards = [...dock.querySelectorAll(
+      '[data-from-id="' + id + '"], [data-to-id="' + id + '"]')].filter((c) => !c.dataset.done);
     cards.forEach((c) => { c.dataset.done = "1"; closeTradeCard(c); });
     return cards.length;
   };
@@ -1619,6 +2020,7 @@
   UI.clearTrades = function () {
     const dock = tradeDock();
     if (dock) dock.innerHTML = "";
+    UI.syncDock();
   };
 
   /* ================= Session log (collapsible, left dock) ================= */
@@ -1636,13 +2038,14 @@
   UI.showSessionLog = function (show) {
     const box = $("#session-log");
     if (box) box.hidden = !show;
+    UI.syncDock();
   };
 
   UI.pushSessionEvent = function (entry) {
     const list = $("#session-log-list");
     const box = $("#session-log");
     if (!list || !box || !entry) return;
-    box.hidden = false;
+    if (box.hidden) { box.hidden = false; UI.syncDock(); }
     const li = document.createElement("li");
     li.className = "slog-entry";
     li.innerHTML =
@@ -1725,9 +2128,46 @@
       tileEl.classList.add("just-bought");
       setTimeout(() => tileEl.classList.remove("just-bought"), 900);
     }
-    const card = player && $('.player-card[data-player-id="' + String(player.id) + '"]');
-    coinFlight(card || $("#action-status"), tileEl, player && player.color);
+    // the roster row, not a ".player-card" — that class has not existed since
+    // the ledger replaced the old cards, so every coin flew from the status line
+    const row = player && $('.pl[data-player-id="' + String(player.id) + '"]');
+    coinFlight(row || $("#action-status"), tileEl, player && player.color);
     window.BT.sfx && window.BT.sfx.buy();
+  };
+
+  /* ================= Match settings viewer ================= */
+
+  /* Every player should be able to check what this table actually agreed to
+   * without asking the host. Read-only on purpose: the rules are fixed once the
+   * match starts, and pretending otherwise would be worse than not showing them.
+   */
+  UI.showRules = function (game) {
+    const box = $("#rules-view");
+    if (!box) return;
+    const c = (game && game.config) || window.BT.DEFAULT_CONFIG;
+    const r = c.rules || {};
+    const yn = (on) => '<b class="' + (on ? "is-on" : "is-off") + '">' + (on ? "On" : "Off") + "</b>";
+    const rows = [
+      ["Starting capital", "<b>" + money(c.startCash) + "</b>"],
+      ["Salary for passing START", "<b>" + money(c.goReward) + "</b>"],
+      ["Prison bail", "<b>" + (c.jailFee ? money(c.jailFee) : "free") + "</b>"],
+      ["Match length", "<b>" + (c.maxRounds ? c.maxRounds + " rounds" : "last tycoon standing") + "</b>"],
+      ["Kafana pot", yn(r.kafanaJackpot)],
+      ["Double rent on full sets", yn(r.doubleRent)],
+      ["Auction declined properties", yn(r.auctions)],
+      ["Mortgages", yn(r.mortgages)],
+      ["Even building", yn(r.evenBuild)],
+      ["Rent while in prison", yn(r.rentInJail)],
+      ["Build any time", yn(r.buildAnytime)],
+    ];
+    if (game && game.rules && game.rules.kafanaJackpot) {
+      rows.push(["Pot right now", "<b>" + money(game.kafanaPot || 0) + "</b>"]);
+    }
+    box.innerHTML = rows
+      .map(([k, v]) => '<div class="rules-row"><span>' + k + "</span>" + v + "</div>")
+      .join("");
+    openModal("#modal-rules");
+    $("#btn-rules-close").onclick = () => closeModal("#modal-rules");
   };
 
   window.BT = Object.assign(window.BT || {}, { UI });

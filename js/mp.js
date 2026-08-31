@@ -170,21 +170,64 @@
         if (this.isHost) this._onGuestAction(action, fromId);
       });
 
+      /* ----- trading -----
+       * An offer is broadcast to the whole room rather than whispered to the
+       * target. A trade rearranges the board for everybody, so a deal only two
+       * people could see meant the rest of the table found out a monopoly had
+       * been assembled after it was too late to do anything about it. Only the
+       * two parties can act: the target accepts, declines or counters, the
+       * sender can withdraw, everyone else watches. */
+
       net.on("trade:offer", (trade, fromId) => {
-        const full = { ...trade, from: fromId, to: this.myId };
         if (!this.game || this.game.phase === "over") {
-          this.net.sendTradeResponse({ accept: false, trade: full });
+          if (trade && trade.to === this.myId) {
+            this.net.sendTradeResponse({ accept: false, trade: { ...trade, from: fromId } });
+          }
           return;
         }
+        const full = { ...trade, from: fromId };
+        const role = trade.to === this.myId ? "target" : fromId === this.myId ? "sender" : "watch";
         const from = this._playerName(fromId);
+        const meta = { fromId, toId: trade.to, tradeId: trade.id, role };
+
         UI.incomingTrade(this.game, trade, from, {
-          onAccept: () => this.net.sendTradeResponse({ accept: true, trade: full }),
-          onDecline: () => this.net.sendTradeResponse({ accept: false, trade: full }),
-          onCounter: () => this.openTradeComposer(fromId, {
-            giveCash: trade.wantCash, giveTiles: trade.wantTiles,
-            wantCash: trade.giveCash, wantTiles: trade.giveTiles,
-          }),
-        }, { fromId });
+          onAccept: role === "target"
+            ? () => this.net.sendTradeResponse({ accept: true, trade: full })
+            : null,
+          onDecline: role === "target"
+            ? () => this.net.sendTradeResponse({ accept: false, trade: full })
+            : null,
+          onCounter: role === "target"
+            ? () => {
+              this.net.sendTradeResponse({ accept: false, trade: full, counter: true });
+              this.openTradeComposer(fromId, {
+                giveCash: trade.wantCash, giveTiles: trade.wantTiles,
+                wantCash: trade.giveCash, wantTiles: trade.giveTiles,
+              });
+            }
+            : null,
+          onWithdraw: role === "sender"
+            ? () => this.net.withdrawTrade(trade.id)
+            : null,
+        }, meta);
+      });
+
+      /* The room's copy of an offer closing: dismiss the card everywhere so no
+       * seat is left staring at a deal that has already been settled. */
+      net.on("trade:closed", ({ id, outcome, byName, fromName } = {}) => {
+        if (id) UI.dismissTrade(id);
+        if (!outcome) return;
+        const style = {
+          accepted: ["exchange", "#22c55e", "accepted"],
+          declined: ["ban", "#ef4444", "declined"],
+          withdrawn: ["trash", "#f59e0b", "withdrew"],
+          stale: ["ban", "#8b98a8", "expired"],
+        }[outcome];
+        if (!style) return;
+        const who = byName || "Someone";
+        UI.log(style[0], style[1], outcome === "withdrawn"
+          ? who + " withdrew their trade offer"
+          : who + " " + style[2] + " " + (fromName ? fromName + "\u2019s" : "the") + " trade offer");
       });
 
       net.on("trade:respond", (payload, fromId) => {
@@ -200,10 +243,10 @@
             this.net.sendEvent({ kind: "deal" });
             this._roomLog("trade_accepted", target + " accepted " + sender + "\u2019s trade", fromId, target);
           } else {
-            this._hostLog("ban", "#ef4444", "Trade failed validation (state changed)");
+            this._hostLog("ban", "#ef4444",
+              target + " accepted a trade that is no longer legal — balances or deeds changed");
           }
         } else if (!payload.accept) {
-          this._hostLog("ban", "#ef4444", target + " declined " + sender + "\u2019s trade offer");
           this._roomLog("trade_declined", target + " declined " + sender + "\u2019s trade", fromId, target);
         }
         this._broadcastState();
@@ -384,9 +427,13 @@
         color: seat.color || SEAT_PRESETS[i % SEAT_PRESETS.length].color,
         tokenStyle: Number.isFinite(seat.tokenStyle) ? seat.tokenStyle : undefined,
       }));
-      const config = this.settings ? {
-        startCash: this.settings.startCash,
-        rules: this.settings.rules,
+      const s = this.settings;
+      const config = s ? {
+        startCash: s.startCash,
+        goReward: s.goReward,
+        jailFee: s.jailFee,
+        maxRounds: s.maxRounds,
+        rules: s.rules,
       } : undefined;
 
       if (this.isHost) {
@@ -436,8 +483,18 @@
           self.dice.roll((a, b, total) => cb(a, b, total), [d1, d2]);
         },
         async movePawn(player, from, steps, hooks) {
-          self.net.sendEvent({ kind: "pawn-move", playerId: player.id, from, steps });
+          /* `seq` lets a guest throw away a stale walk. Two moves for the same
+           * pawn can overlap (doubles, or a card that moves you again), and
+           * without a sequence number the older animation's completion handler
+           * would land the pawn on the older target — which is exactly the
+           * "he sees me one field further along" desync. */
+          self._moveSeq = (self._moveSeq || 0) + 1;
+          self.net.sendEvent({
+            kind: "pawn-move", playerId: player.id, from, steps, seq: self._moveSeq,
+          });
+          self._movingPawn = player.id;
           const pos = await self.pawnLayer.hopTo(player.id, from, steps, hooks);
+          self._movingPawn = null;
           UI.flashTile(pos);
           return pos;
         },
@@ -453,6 +510,15 @@
           self.pawnLayer.setJailed(player.id, jailed);
           if (jailed) window.BT.sfx.jail();
           self.net.sendEvent({ kind: "jailed", playerId: player.id, jailed });
+        },
+        /* Presence of this hook is what stops the engine liquidating for the
+         * player. The debt then rides along in the state snapshot, so the
+         * debtor's own client raises the settle window — no prompt plumbing
+         * needed, and it survives their reload. The timer below is the only
+         * safety net: if they never answer, the bank steps in so the rest of
+         * the table is not held hostage. */
+        debtRaised(player) {
+          self._armDebtTimeout(player);
         },
         promptBuy(player, tile, price) {
           if (player.id === self.myId) return UI.promptBuy(player, tile, price);
@@ -547,6 +613,40 @@
      * hang on the answer: an offline seat is answered immediately with the
      * safe default, and everyone else is time-boxed to the turn timer.
      */
+    /**
+     * Host-side safety net for a debt nobody is answering.
+     *
+     * It only ever fires for a seat that has actually LEFT. A player who is
+     * present gets as long as they want: settling is a real decision — which
+     * houses to sell, which deed to hock, whether to concede — and having the
+     * bank liquidate your portfolio because you thought about it for a minute is
+     * the opposite of playing the game. An absent player still cannot hold the
+     * rest of the table hostage.
+     */
+    _armDebtTimeout(player) {
+      clearTimeout(this._debtTimer);
+      const tick = () => {
+        const g = this.game;
+        const p = g && g.player(player.id);
+        if (!p || !p.debtAmount) { this._clearDebtTimeout(); return; } // dealt with
+        if (this.presence.get(p.id) === false) {
+          this._hostLog("clock", "#f59e0b",
+            p.name + " left mid-debt \u2014 the bank settles it for them");
+          this._clearDebtTimeout();
+          g.forceSettle(p);
+          return;
+        }
+        this._debtTimer = setTimeout(tick, 5000);
+      };
+      // one grace period before the first check, then poll while it is unpaid
+      this._debtTimer = setTimeout(tick, 8000);
+    }
+
+    _clearDebtTimeout() {
+      clearTimeout(this._debtTimer);
+      this._debtTimer = null;
+    }
+
     _promptRemote(player, prompt, fallback) {
       // already gone? do not even send it — resolve on the spot
       if (this.presence.get(player.id) === false) {
@@ -569,6 +669,19 @@
 
     /* ================= host: guest actions ================= */
 
+    /**
+     * Host-side gate on a player touching their own deeds. Mirrors UI.canManage
+     * so the client and the authority agree: your own turn always, any turn when
+     * the table allows it, and always while you owe money — that prompt exists
+     * so you can raise cash, and locking the controls would make it a dead end.
+     */
+    _mayManage(g, p) {
+      if (!g || !p || p.bankrupt || g.phase === "over") return false;
+      if (p.debtAmount > 0) return true;
+      if (g.rules && g.rules.buildAnytime) return true;
+      return g.current && g.current.id === p.id;
+    }
+
     _onGuestAction(action, fromId) {
       const g = this.game;
       if (!g || g.phase === "over") return;
@@ -582,6 +695,19 @@
         case "end-turn":
           if (fromId === g.current.id && g.phase === "turn-end") void g.endTurn();
           break;
+        /* The engine keeps its own copy of the roster, so a rename has to be
+         * pushed into it or the ledger, the log and every deed card keep using
+         * the name the player joined with. */
+        case "rename": {
+          const p = g.player(fromId);
+          const name = String(action.name || "").trim().slice(0, 16);
+          if (!p || !name || p.name === name) break;
+          const was = p.name;
+          p.name = name;
+          this._hostLog("users", "#8b98a8", was + " is now " + name);
+          g._changed();
+          break;
+        }
         case "prompt-response": {
           const entry = this.pendingPrompts.get(action.id);
           if (entry && entry.playerId === fromId) {
@@ -593,25 +719,42 @@
         case "build": {
           const p = g.player(fromId);
           const tile = tileById(String(action.tileId));
-          if (p && tile && g.props[tile.id] && g.props[tile.id].owner === fromId) g.build(p, tile.id);
+          if (!p || !tile || !g.props[tile.id] || g.props[tile.id].owner !== fromId) break;
+          if (!this._mayManage(g, p)) break;
+          g.build(p, tile.id);
           break;
         }
         case "sell": {
           const p = g.player(fromId);
           const tile = tileById(String(action.tileId));
-          if (p && tile && g.props[tile.id] && g.props[tile.id].owner === fromId) g.sellHouse(p, tile.id);
+          if (!p || !tile || !g.props[tile.id] || g.props[tile.id].owner !== fromId) break;
+          if (!this._mayManage(g, p)) break;
+          g.sellHouse(p, tile.id);
           break;
         }
         /* Deed actions. The engine's can* guards cover the rules; the host adds
          * the two checks a client must never be trusted with — that the deed is
          * really theirs, and that it is really their turn. */
+        /* Settling is the debtor's own call, so it is checked against the
+         * sender rather than the current turn — a debt can outlive the roll
+         * that caused it. */
+        case "settle-debt": {
+          const p = g.player(fromId);
+          if (p && p.debtAmount > 0 && g.settleDebt(p)) this._clearDebtTimeout();
+          break;
+        }
+        case "declare-bankrupt": {
+          const p = g.player(fromId);
+          if (p && !p.bankrupt) { g.declareBankrupt(p); this._clearDebtTimeout(); }
+          break;
+        }
         case "mortgage":
         case "unmortgage":
         case "sell-field": {
           const p = g.player(fromId);
           const tile = tileById(String(action.tileId));
           if (!p || !tile || !g.props[tile.id] || g.props[tile.id].owner !== fromId) break;
-          if (g.current.id !== fromId) break;
+          if (!this._mayManage(g, p)) break;
           if (action.kind === "mortgage") g.mortgage(p, tile.id);
           else if (action.kind === "unmortgage") g.unmortgage(p, tile.id);
           else g.sellField(p, tile.id);
@@ -626,12 +769,30 @@
       this.net.sendEvent({ kind: "log", icon: iconKey, color, text });
     }
 
-    /** Snapshots go out only from stable phases (never mid-animation). */
+    /**
+     * Push the authoritative state to every guest.
+     *
+     * This used to bail out whenever the engine was in the `busy` phase, which
+     * covers the entire resolution of a turn: the roll, the move, the purchase,
+     * the rent, the card. So a guest's ledger did not move until the turn was
+     * over, and every payment inside it was invisible while it happened — a
+     * buyer's balance stayed full after they bought, and rent landed in the
+     * landlord's column seconds later, out of context. From the other side of
+     * the table that is indistinguishable from "he didn't pay".
+     *
+     * The reason for the old guard was pawn drift, not money: a snapshot landing
+     * mid-hop would yank a pawn to its destination. That is handled properly on
+     * the guest (`_animating`) and here (`_movingPawn`), so state can stream
+     * continuously and only the walk itself is protected.
+     */
     _broadcastState() {
       if (!this.isHost || !this.game) return;
-      if (this.game.phase === "busy") return;
       this.net.sendState(this.game.serialize());
-      this.net.sendEvent({ kind: "turn", deadline: this._turnDeadline, currentId: this.game.current.id });
+      this.net.sendEvent({
+        kind: "turn",
+        deadline: this._turnDeadline,
+        currentId: this.game.current ? this.game.current.id : null,
+      });
     }
 
     _armTurnTimer() {
@@ -690,7 +851,6 @@
           this.dice.roll(() => {}, [event.d1, event.d2], { interrupt: true });
           break;
         case "pawn-move": {
-          const player = g && g.player(event.playerId);
           const pawn = this.pawnLayer.pawns.get(event.playerId);
           /* The host's `from` is authoritative. This used to hop from the
            * guest's own belief of where the pawn stood, so any drift — a
@@ -703,16 +863,36 @@
           if (pawn && pawn.pos !== event.from) {
             this.pawnLayer.placeAt(event.playerId, event.from);
           }
+          /* Supersede any walk already in flight for this pawn. Two overlapping
+           * moves used to both run to completion, and whichever finished LAST
+           * won — so a stale animation could plant the pawn a field away from
+           * where the host says it is and leave it there until the next
+           * snapshot. Now only the newest sequence is allowed to land. */
+          const seq = Number(event.seq) || 0;
+          this._moveSeqs = this._moveSeqs || new Map();
+          this._moveSeqs.set(event.playerId, seq);
           this._animating.add(event.playerId);
           const ring = window.BT.TILES.length;
           const target = (((event.from + event.steps) % ring) + ring) % ring;
           this.pawnLayer
             .hopTo(event.playerId, event.from, event.steps, { onPassGo: () => {} })
             .then(() => {
+              if (this._moveSeqs.get(event.playerId) !== seq) return; // superseded
               this._animating.delete(event.playerId);
+              /* Land on from+steps, computed from the host's own numbers, rather
+               * than on wherever the animation happened to stop or on a snapshot
+               * that may still be describing the tile we left. Any real drift is
+               * corrected by _reconcilePawns on the next snapshot. */
               this.pawnLayer.placeAt(event.playerId, target);
               UI.flashTile(target);
-              if (player) player.position = target;
+              /* Re-resolve the player: applySnapshot rebuilds the whole roster,
+               * so `player` captured when the event arrived is very likely a
+               * discarded object by now. Writing the landing tile into it left
+               * the live roster still pointing at the tile we came FROM — which
+               * is what made a pawn look a field off and then snap back to
+               * "default" the moment the next snapshot reconciled it. */
+              const live = this.game && this.game.player(event.playerId);
+              if (live) live.position = target;
             });
           break;
         }
@@ -827,6 +1007,22 @@
       else this.net.sendAction({ kind: "build", tileId });
     }
 
+    clickSettleDebt() {
+      if (!this.game) return;
+      if (this.isHost) {
+        const p = this.game.player(this.myId);
+        if (p && this.game.settleDebt(p)) this._clearDebtTimeout();
+      } else this.net.sendAction({ kind: "settle-debt" });
+    }
+
+    clickDeclareBankrupt() {
+      if (!this.game) return;
+      if (this.isHost) {
+        this.game.declareBankrupt(this.game.player(this.myId));
+        this._clearDebtTimeout();
+      } else this.net.sendAction({ kind: "declare-bankrupt" });
+    }
+
     clickMortgage(tileId) {
       if (!this.game) return;
       if (this.isHost) this.game.mortgage(this.game.player(this.myId), tileId);
@@ -861,8 +1057,12 @@
         prefillTo: prefillTo || null,
         prefill: prefill || null,
         onSend: (trade) => {
-          this.net.sendTradeOffer(trade);
-          UI.log("exchange", "#22c55e", "Trade offer sent to " + this._playerName(trade.to) + ".");
+          // A stable id is what lets every seat's copy of the card be dismissed
+          // together when the offer is answered or pulled.
+          const withId = { ...trade, id: "t" + this.myId.slice(0, 6) + "-" + Date.now().toString(36) };
+          this.net.sendTradeOffer(withId);
+          UI.log("exchange", "#22c55e",
+            "Offer sent to " + this._playerName(trade.to) + " — the whole table can see it.");
         },
       });
     }

@@ -93,17 +93,24 @@ const PALETTE = [
 /** Clamp a lobby match-settings payload into a safe shape. */
 function sanitizeSettings(raw) {
   const r = raw ?? {};
-  const cash = Number(r.startCash);
+  const pick = (v, allowed, fallback) => (allowed.includes(Number(v)) ? Number(v) : fallback);
   const max = Number(r.maxPlayers);
-  const timer = r.turnTimer == null ? null : Number(r.turnTimer);
+  const timer = r.turnTimer == null || r.turnTimer === "" ? null : Number(r.turnTimer);
   return {
-    startCash: [500, 800, 1000, 1500, 2000].includes(cash) ? cash : 1500,
+    startCash: pick(r.startCash, [500, 800, 1000, 1500, 2000, 3000], 1500),
     maxPlayers: Number.isFinite(max) ? Math.min(6, Math.max(2, Math.floor(max))) : 4,
-    turnTimer: [30, 45, 60].includes(timer) ? timer : null,
+    turnTimer: [30, 45, 60, 120].includes(timer) ? timer : null,
+    goReward: pick(r.goReward, [100, 200, 300, 400], 200),
+    jailFee: pick(r.jailFee, [0, 50, 100, 150], 50),
+    maxRounds: pick(r.maxRounds, [0, 30, 60, 120], 60),
     rules: {
       kafanaJackpot: r.rules?.kafanaJackpot !== false,
       doubleRent: r.rules?.doubleRent !== false,
       auctions: r.rules?.auctions === true,
+      mortgages: r.rules?.mortgages !== false,
+      evenBuild: r.rules?.evenBuild !== false,
+      rentInJail: r.rules?.rentInJail !== false,
+      buildAnytime: r.rules?.buildAnytime !== false,
     },
   };
 }
@@ -262,10 +269,21 @@ function scheduleHostMigration(room) {
 }
 
 /** Flag a seat as dropped without ever removing it from the match. */
+/** Cancel every offer a seat is a party to, and tell the room. */
+function dropTradesFor(room, token) {
+  if (!room.trades) return;
+  for (const [id, rec] of [...room.trades]) {
+    if (rec.from !== token && rec.to !== token) continue;
+    room.trades.delete(id);
+    io.to(room.code).emit("trade:closed", { id, outcome: "stale" });
+  }
+}
+
 function markOffline(room, seat) {
   if (!seat.connected) return;
   seat.connected = false;
   seat.disconnectedAt = Date.now();
+  dropTradesFor(room, seat.token); // their pending offers are dead letters
   systemChat(room, `${seat.name} disconnected`);
   logEvent(room, {
     type: "player_disconnected",
@@ -359,6 +377,8 @@ io.on("connection", (socket) => {
       turnDeadline: null,
       log: [],
       hostGrace: null,
+      /** id -> { id, from, to } for offers currently on the table. */
+      trades: new Map(),
     };
     rooms.set(r.code, r);
     currentCode = r.code;
@@ -510,6 +530,37 @@ io.on("connection", (socket) => {
     broadcast(r);
   });
 
+  /**
+   * Change your display name. Allowed in the lobby AND mid-match: you join a
+   * friend's room, land in the staging list as "Player", and there was no way to
+   * fix it short of leaving and rejoining. Names must stay distinct enough to
+   * tell seats apart, so a collision gets a numeric suffix rather than a
+   * silent rejection.
+   */
+  socket.on("lobby:name", (raw) => {
+    const r = room();
+    if (!r) return;
+    const seat = seatBySocket(r, socket.id);
+    if (!seat) return;
+    let name = String(raw ?? "").trim().slice(0, 16);
+    if (!name) return;
+    if (r.seats.some((s) => s !== seat && s.name.toLowerCase() === name.toLowerCase())) {
+      const base = name;
+      for (let n = 2; n < 20; n++) {
+        name = `${base} ${n}`.slice(0, 16);
+        if (!r.seats.some((s) => s !== seat && s.name.toLowerCase() === name.toLowerCase())) break;
+      }
+    }
+    if (name === seat.name) return;
+    const was = seat.name;
+    seat.name = name;
+    systemChat(r, `${was} is now ${name}`);
+    // the running engine keeps its own copy of the roster, so tell the host too
+    const hostId = hostSocket(r);
+    if (hostId) io.to(hostId).emit("player:action", { kind: "rename", name }, seat.token);
+    broadcast(r);
+  });
+
   /** Pick a token face style. */
   socket.on("lobby:avatar", (idxRaw) => {
     const r = room();
@@ -569,6 +620,13 @@ io.on("connection", (socket) => {
 
   /* ----- trading relays ----- */
 
+  /* ----- trading -----
+   * Offers are broadcast to the WHOLE room, not whispered to the target. A trade
+   * reshapes the board for everybody, so the rest of the table has a right to see
+   * one being made. Authority over who may act on it stays with the two parties:
+   * the relay only accepts a response from the target and a withdrawal from the
+   * sender, so a spectator cannot answer a deal that is not theirs. */
+
   socket.on("trade:offer", (trade) => {
     const r = room();
     if (!r || r.status !== "playing") return;
@@ -580,12 +638,14 @@ io.on("connection", (socket) => {
       socket.emit("error", `${target.name} is disconnected — offer not delivered.`);
       return;
     }
-    io.to(target.id).emit("trade:offer", trade, from.token);
+    const id = String(trade.id || `t${from.token.slice(0, 6)}-${Date.now().toString(36)}`);
+    r.trades.set(id, { id, from: from.token, to: target.token });
+    io.to(r.code).emit("trade:offer", { ...trade, id }, from.token);
     logEvent(r, {
       type: "trade_offer",
       playerId: from.token,
       name: from.name,
-      text: `${from.name} sent ${target.name} a trade offer`,
+      text: `${from.name} offered ${target.name} a trade`,
     });
   });
 
@@ -595,7 +655,33 @@ io.on("connection", (socket) => {
     const seat = seatBySocket(r, socket.id);
     const hostId = hostSocket(r);
     if (!seat || !hostId) return;
+    const trade = payload?.trade;
+    const id = trade && String(trade.id || "");
+    const rec = id ? r.trades.get(id) : null;
+    // only the player the offer was aimed at may answer it
+    if (rec && rec.to !== seat.token) return;
+    if (rec) r.trades.delete(id);
     io.to(hostId).emit("trade:respond", payload, seat.token);
+    if (id) {
+      const fromSeat = rec ? r.seats.find((s) => s.token === rec.from) : null;
+      io.to(r.code).emit("trade:closed", {
+        id,
+        outcome: payload?.accept ? "accepted" : "declined",
+        byName: seat.name,
+        fromName: fromSeat ? fromSeat.name : null,
+      });
+    }
+  });
+
+  socket.on("trade:withdraw", (payload) => {
+    const r = room();
+    if (!r) return;
+    const seat = seatBySocket(r, socket.id);
+    const id = payload && String(payload.id || "");
+    const rec = id ? r.trades.get(id) : null;
+    if (!seat || !rec || rec.from !== seat.token) return; // senders only
+    r.trades.delete(id);
+    io.to(r.code).emit("trade:closed", { id, outcome: "withdrawn", byName: seat.name });
   });
 
   /* ----- chat ----- */

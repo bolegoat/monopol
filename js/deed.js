@@ -1,25 +1,35 @@
 /* ============================================================================
  * Balkan Tycoon — deed.js
- * Directional hover tooltip: a clean Balkan property deed card that follows
- * the pointer across any property tile and always opens toward the board:
- *   bottom edge tiles -> opens UP, top edge -> DOWN,
- *   left edge -> RIGHT, right edge -> LEFT.
- * Positioning is viewport-aware (clamped on-screen after measurement).
+ * The property inspector: a full Balkan deed card rendered into its own column
+ * in the side panel, plus the build / mortgage / sell controls for plots you
+ * own.
+ *
+ * This used to be a tooltip that followed the pointer and opened INTO the
+ * board, which meant the instant you hovered a plot to read it you lost sight
+ * of the houses standing on it and of any pawn parked there — the two things
+ * you were almost certainly checking. Docking it fixes that outright: nothing
+ * on the board is ever covered, the card is big enough to read, it holds real
+ * buttons, and it stays put after the pointer leaves the board so you can walk
+ * over and click them.
+ *
+ * That is also where property management lives now. There is no separate
+ * "manage" mode: you look at a plot, and the things you can do to it are right
+ * there under the rent table.
  * Strictly no emoji characters: typography, SVG icons and CSS badges only.
  * ========================================================================== */
 
 "use strict";
 
 (function () {
-  const GAP = 10;  // px between the tile and the deed card
-  const EDGE = 8;  // minimum distance to the viewport edge
-
-  let tip = null;
-  let curTileEl = null;
+  const $ = (sel) => document.querySelector(sel);
 
   const EURO = "\u20ac";
   const DOT = "\u00b7";
   const euro = (n) => EURO + n;
+
+  /** Currently inspected tile id, and whether a click pinned it. */
+  let curId = null;
+  let pinned = false;
 
   /* Player names come from a lobby text field and land in innerHTML below, so
    * they have to be escaped rather than trusted. */
@@ -55,8 +65,6 @@
     return g.ownsGroup(g.player(ps.owner), tile.country) ? "mono" : "base";
   }
 
-
-
   /* ---------- deed card builders (emoji-free by design) ---------- */
 
   function head(bannerColor, badgeStyle, iconName, name, subline, price) {
@@ -89,16 +97,6 @@
     );
   }
 
-  /**
-   * What is actually built here, as pieces rather than a sentence.
-   *
-   * The card used to state "currently 2 houses" in prose at the very bottom,
-   * which meant hovering a developed property showed you no houses at all. Now
-   * it shows the pieces themselves: filled slots are green houses, the empty
-   * slots spell out how much room is left to build, and a hotel replaces the
-   * lot with one red piece. Current rent sits on the right, because that is
-   * the number the development is really telling you about.
-   */
   /** Which pawns are standing on this tile right now. */
   function whoIsHere(g, tile) {
     if (!g) return "";
@@ -113,6 +111,12 @@
       "</div>";
   }
 
+  /**
+   * What is actually built here, as pieces rather than a sentence: filled slots
+   * are green houses, empty slots spell out how much room is left, and a hotel
+   * replaces the lot with one red piece. Current rent sits on the right, because
+   * that is the number the development is really telling you about.
+   */
   function devStrip(g, tile) {
     const ps = g && g.props[tile.id];
     if (!ps || !ps.owner) return "";
@@ -159,7 +163,7 @@
 
     let html =
       head(c.color, window.BT.flagBg(tile.country), null,
-        tile.name, c.name + " " + DOT + " Group " + c.short, tile.price);
+        esc(tile.name), esc(c.name) + " " + DOT + " Group " + c.short, tile.price);
 
     html += '<div class="deed__table">' +
       rentRow("Base Rent", b, "base", lv) +
@@ -180,8 +184,6 @@
 
     if (g && lv) {
       const p = g.player(g.props[tile.id].owner);
-      // development is covered by the strip above, so the footer carries the
-      // other half of the story: who holds it, and whether they hold the set
       const owned = COUNTRY_GROUPS[tile.country]
         .filter((id) => g.props[id].owner === p.id).length;
       const total = COUNTRY_GROUPS[tile.country].length;
@@ -190,7 +192,7 @@
           '<span class="deed__token" style="background:' + p.color + '">' + face(p) + "</span>" +
           "Owned by <strong>" + esc(p.name) + "</strong> " + DOT + " " +
           (owned === total
-            ? "holds all of " + c.name
+            ? "holds all of " + esc(c.name)
             : owned + " of " + total + " " + c.short + " cities") +
         "</div>";
     }
@@ -207,7 +209,7 @@
 
     let html =
       head("#4f7d99", "background:linear-gradient(150deg,#2c4a60,#1b2f40)", "plane",
-        tile.name, "Balkan Air " + DOT + " Transport group", tile.price);
+        esc(tile.name), "Balkan Air " + DOT + " Transport group", tile.price);
 
     html += '<div class="deed__table">' +
       rentRow("With 1 Airport", ECONOMY.airportRent[0], "a1", lv) +
@@ -215,6 +217,8 @@
       rentRow("With 3 Airports", ECONOMY.airportRent[2], "a3", lv) +
       rentRow("With 4 Airports", ECONOMY.airportRent[3], "a4", lv) +
       "</div>";
+
+    html += devStrip(g, tile);
 
     html += '<div class="deed__costs">' +
       costRow("plane", "Rent", "doubles per airport owned") +
@@ -226,7 +230,7 @@
       html +=
         '<div class="deed__live">' +
           '<span class="deed__token" style="background:' + p.color + '">' + face(p) + "</span>" +
-          "Owned by <strong>" + esc(p.name) + "</strong>" + DOT + " currently " +
+          "Owned by <strong>" + esc(p.name) + "</strong> " + DOT + " currently " +
           count + " airport" + (count > 1 ? "s" : "") +
         "</div>";
     }
@@ -245,12 +249,14 @@
     let html =
       head("#8f8a3f", "background:linear-gradient(150deg,#4a4a24,#2e2e16)",
         tile.id === "balkan-electric" ? "zap" : "bottle",
-        tile.name, "Utility " + DOT + " Services group", tile.price);
+        esc(tile.name), "Utility " + DOT + " Services group", tile.price);
 
     html += '<div class="deed__table">' +
       rentRow("One Utility Owned", 28, "u1", oneKey) +
       rentRow("Both Utilities Owned", 70, "u2", both ? "u2" : null) +
       "</div>";
+
+    html += devStrip(g, tile);
 
     html += '<p class="deed__note">Rent is ' +
       "<b>4" + "\u00d7" + "</b> the dice total, or <b>10" + "\u00d7" +
@@ -266,11 +272,71 @@
       html +=
         '<div class="deed__live">' +
           '<span class="deed__token" style="background:' + p.color + '">' + face(p) + "</span>" +
-          "Owned by <strong>" + esc(p.name) + "</strong>" + DOT + " currently " +
+          "Owned by <strong>" + esc(p.name) + "</strong> " + DOT + " currently " +
           (both ? "both utilities" : "one utility") +
         "</div>";
     }
     return html + whoIsHere(g, tile);
+  }
+
+  /* ---------- the action strip: this is the property manager ---------- */
+
+  function actionStrip(g, tile) {
+    const UI = window.BT.UI;
+    const me = UI.me(g);
+    const ps = g && g.props[tile.id];
+    if (!g || !me || !ps) return "";
+
+    if (ps.owner !== me.id) {
+      // not yours: say what it would take, rather than showing dead buttons
+      if (!ps.owner) {
+        return '<div class="deed-acts"><p class="deed-acts__note">Unclaimed &mdash; ' +
+          euro(tile.price) + " if you land on it.</p></div>";
+      }
+      return "";
+    }
+
+    const allow = UI.canManage(g);
+    const sellRate = ECONOMY.sellRate;
+    const btn = (act, label, ic, enabled, title, cls) =>
+      '<button class="btn' + (cls ? " " + cls : "") + '" type="button" data-deed-act="' + act +
+      '" data-tile="' + esc(tile.id) + '"' + (enabled && allow ? "" : " disabled") +
+      ' title="' + esc(title) + '">' + window.BT.icon(ic) + label + "</button>";
+
+    const parts = [];
+    if (tile.kind === "city") {
+      parts.push(btn("build", "Build " + euro(tile.houseCost), "plus",
+        g.canBuildOn(me, tile), "Raise a house here for " + euro(tile.houseCost)));
+      parts.push(btn("sell", "Sell house", "minus",
+        g.canSellOn(me, tile),
+        "Sell a house back for " + euro(Math.round(tile.houseCost * sellRate))));
+    }
+    if (g.rules.mortgages) {
+      if (ps.mortgaged) {
+        parts.push(btn("unmortgage", "Buy back " + euro(g.unmortgageCost(tile)), "key",
+          g.canUnmortgage(me, tile), "Clear the mortgage for " + euro(g.unmortgageCost(tile)),
+          tile.kind === "city" ? "" : "btn--wide"));
+      } else {
+        parts.push(btn("mortgage", "Mortgage " + euro(Math.round(tile.price * ECONOMY.mortgageRate)),
+          "banknote", g.canMortgage(me, tile),
+          "Raise " + euro(Math.round(tile.price * ECONOMY.mortgageRate)) + " against this deed",
+          tile.kind === "city" ? "" : "btn--wide"));
+      }
+    }
+    parts.push(btn("sell-field", "Sell to bank " + euro(Math.round(tile.price * sellRate)), "coins",
+      g.canSellField(me, tile),
+      "Hand the deed back for " + euro(Math.round(tile.price * sellRate)), "btn--wide"));
+
+    let note = "";
+    if (!allow) note = "You can only change your deeds on your own turn.";
+    else if (tile.kind === "city" && !g.ownsGroup(me, tile.country)) {
+      note = "You need every city in " + esc(COUNTRIES[tile.country].name) + " before you can build.";
+    } else if (tile.kind === "city" && COUNTRY_GROUPS[tile.country].some((id) => g.props[id].mortgaged)) {
+      note = "Nothing can be built while a deed in this country is mortgaged.";
+    }
+
+    return '<div class="deed-acts">' + parts.join("") +
+      (note ? '<p class="deed-acts__note">' + note + "</p>" : "") + "</div>";
   }
 
   function contentFor(tile) {
@@ -279,48 +345,7 @@
     return utilityDeed(tile);
   }
 
-  /* ---------- directional placement ---------- */
-
-  function placeFor(el) {
-    const side = window.BT.tileSide(Number(el.dataset.pos)); // bottom/left/top/right
-    const r = el.getBoundingClientRect();
-    const w = tip.offsetWidth;
-    const h = tip.offsetHeight;
-
-    let x, y;
-    if (side === "bottom") {        // bottom edge: open UP above the tile
-      x = r.left + r.width / 2 - w / 2;
-      y = r.top - h - GAP;
-    } else if (side === "top") {    // top edge: open DOWN below the tile
-      x = r.left + r.width / 2 - w / 2;
-      y = r.bottom + GAP;
-    } else if (side === "left") {   // left edge: open RIGHT into the board
-      x = r.right + GAP;
-      y = r.top + r.height / 2 - h / 2;
-    } else {                        // right edge: open LEFT into the board
-      x = r.left - w - GAP;
-      y = r.top + r.height / 2 - h / 2;
-    }
-
-    // viewport-aware clamp: never spill off-screen, whatever the window does
-    x = Math.min(Math.max(x, EDGE), window.innerWidth - w - EDGE);
-    y = Math.min(Math.max(y, EDGE), window.innerHeight - h - EDGE);
-
-    tip.style.left = Math.round(x) + "px";
-    tip.style.top = Math.round(y) + "px";
-
-    // entry animation slides in from the opening direction
-    tip.classList.remove("deed--up", "deed--down", "deed--left", "deed--right", "anim");
-    tip.classList.add(
-      side === "bottom" ? "deed--up"
-        : side === "top" ? "deed--down"
-        : side === "left" ? "deed--right" : "deed--left",
-    );
-    void tip.offsetWidth; // restart the CSS animation
-    tip.classList.add("anim");
-  }
-
-  /* ---------- wiring ---------- */
+  /* ---------- rendering into the docked panel ---------- */
 
   function isPropertyTile(el) {
     const idx = Number(el.dataset.pos);
@@ -328,38 +353,73 @@
     return Boolean(tile && (tile.kind === "city" || tile.kind === "airport" || tile.kind === "utility"));
   }
 
-  function hide() {
-    curTileEl = null;
-    if (tip) tip.hidden = true;
+  function render() {
+    const slot = $("#inspect-slot");
+    if (!slot) return;
+    const tile = curId && window.BT.tileById(curId);
+    if (!tile) {
+      slot.innerHTML = '<p class="inspect-empty">Hover a property to inspect it.<br />' +
+        "Click a plot you own to build, mortgage or sell.</p>";
+      return;
+    }
+    const g = activeGame();
+    const card = document.createElement("div");
+    card.className = "deed";
+    card.innerHTML = contentFor(tile) + actionStrip(g, tile);
+    slot.innerHTML = "";
+    slot.appendChild(card);
+
+    card.querySelectorAll("[data-deed-act]").forEach((b) => {
+      b.onclick = () => {
+        const UI = window.BT.UI;
+        const id = b.dataset.tile;
+        const map = {
+          build: UI.buildHandler,
+          sell: UI.sellHandler,
+          mortgage: UI.mortgageHandler,
+          unmortgage: UI.unmortgageHandler,
+          "sell-field": UI.sellFieldHandler,
+        };
+        const fn = map[b.dataset.deedAct];
+        if (typeof fn === "function") fn(id);
+        // the deed will be re-rendered by UI.sync once the engine reports back;
+        // repaint straight away so a local click never feels dropped
+        setTimeout(render, 0);
+      };
+    });
+  }
+
+  /* ---------- wiring ---------- */
+
+  function show(tileId, viaClick) {
+    if (viaClick) pinned = curId === tileId ? !pinned : true;
+    if (curId === tileId && !viaClick) return;
+    curId = tileId;
+    render();
   }
 
   function onMouseMove(e) {
+    if (pinned) return;
     const el = e.target && e.target.closest ? e.target.closest(".tile") : null;
-    const target = el && isPropertyTile(el) ? el : null;
-    if (target === curTileEl) return;
-    curTileEl = target;
-    if (!target) { hide(); return; }
+    if (!el || !isPropertyTile(el)) return; // leaving the board keeps the last card up
+    const tile = TILES[Number(el.dataset.pos)];
+    el.removeAttribute("title"); // the deed replaces the native tooltip
+    show(tile.id, false);
+  }
 
-    const tile = TILES[Number(target.dataset.pos)];
-    target.removeAttribute("title"); // the deed replaces the native tooltip
-    tip.innerHTML = contentFor(tile);
-    tip.hidden = false;
-    placeFor(target);
+  function onClick(e) {
+    const el = e.target && e.target.closest ? e.target.closest(".tile") : null;
+    if (!el || !isPropertyTile(el)) return;
+    const tile = TILES[Number(el.dataset.pos)];
+    show(tile.id, true);
   }
 
   function init() {
-    tip = document.createElement("div");
-    tip.className = "deed";
-    tip.hidden = true;
-    tip.setAttribute("role", "tooltip");
-    tip.setAttribute("aria-hidden", "true");
-    document.body.appendChild(tip);
-
-    document.addEventListener("mousemove", onMouseMove, { passive: true });
-    document.addEventListener("mouseleave", hide);
-    window.addEventListener("blur", hide);
-    window.addEventListener("resize", hide);
-    window.addEventListener("scroll", hide, true);
+    const board = document.getElementById("board");
+    if (!board) return;
+    board.addEventListener("mousemove", onMouseMove, { passive: true });
+    board.addEventListener("click", onClick);
+    render();
   }
 
   if (document.readyState === "loading") {
@@ -367,4 +427,13 @@
   } else {
     init();
   }
+
+  window.BT = Object.assign(window.BT || {}, {
+    Deed: {
+      refresh: render,
+      show: (tileId) => show(tileId, true),
+      clear: () => { curId = null; pinned = false; render(); },
+      get pinned() { return pinned; },
+    },
+  });
 })();

@@ -90,19 +90,6 @@ body {
 
 .top-bar-right { display: flex; align-items: center; gap: 8px; }
 
-.room-chip {
-  padding: 4px 11px;
-  border-radius: 7px;
-  background: rgba(240, 182, 74, 0.1);
-  border: 1px solid rgba(240, 182, 74, 0.35);
-  color: var(--gold);
-  font-size: clamp(10px, 0.9vw, 13px);
-  font-weight: 800;
-  letter-spacing: 0.22em;
-  cursor: pointer;
-  user-select: all;
-}
-
 .turn-timer {
   display: inline-flex;
   align-items: center;
@@ -120,46 +107,6 @@ body {
 .turn-timer.is-low { color: var(--red); border-color: rgba(239, 68, 68, 0.45); animation: timer-pulse 1s infinite; }
 
 @keyframes timer-pulse { 50% { background: rgba(239, 68, 68, 0.14); } }
-
-/* who is on turn: seat dot, name, round counter */
-.turn-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 4px 10px 4px 8px;
-  border-radius: 7px;
-  background: var(--panel-2);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  font-size: clamp(10px, 0.95vw, 13px);
-  font-weight: 600;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.turn-chip__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--pc, var(--muted));
-  flex: 0 0 auto;
-}
-
-.turn-chip.is-mine { border-color: var(--pc); }
-.turn-chip.is-mine .turn-chip__dot { animation: turn-dot 1.4s ease-in-out infinite; }
-
-@keyframes turn-dot { 50% { opacity: 0.3; } }
-
-.turn-chip strong { color: var(--cream); font-weight: 700; }
-
-.turn-chip__round {
-  font-size: 0.82em;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  color: #5d6a7d;
-  padding-left: 6px;
-  margin-left: 1px;
-  border-left: 1px solid rgba(255, 255, 255, 0.09);
-}
 
 /* board wrap: definite tracks so the square board caps correctly */
 .board-wrap {
@@ -341,17 +288,21 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.35em;
-  padding: 0 2%;
+  gap: 0.2em;
+  padding: 0 1%;
 }
 
 .tile__price {
-  font-size: min(clamp(0.8rem, 1.1vw, 1.05rem), 1.35cqw);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: clip;
+  font-size: min(clamp(0.7rem, 0.95vw, 0.95rem), 1.2cqw);
   font-weight: 600;
   color: #f4f6fa;
   background: rgba(6, 9, 14, 0.62);
   border: 1px solid rgba(255, 255, 255, 0.09);
-  padding: 0.05em 0.4em;
+  padding: 0.05em 0.3em;
   border-radius: 999px;
   white-space: nowrap;
   line-height: 1.5;
@@ -373,6 +324,14 @@ body {
   background: rgba(6, 9, 14, 0.8);
   font-weight: 800;
 }
+
+/* The footer is one row on a tile roughly 76px wide, so it can hold the owner
+   chip, the flag badge and the rent — but not all three. Once a plot is owned,
+   the flag badge is the one to go: the country is already stated by the flag
+   banner across the top of the card and by the group strip along the edge,
+   whereas the rent is the number you actually need and was getting clipped to
+   "R €" on every owned city. */
+.tile.is-owned .tile__flagbadge { display: none; }
 
 /* small country flag badge sitting next to the price tag */
 .tile__flagbadge {
@@ -397,84 +356,106 @@ body {
   height: 4px;
 }
 
-/* ---------- ownership, layer 2: the owner plate ----------
- * A solid seat-color band on the center-facing rim, carrying the owner's
- * initial in ink chosen by luminance (ui.js inkOn) so it stays legible on
- * amber and on violet alike. The initial is what makes the board unambiguous:
- * two seats can sit close together on the color wheel, and colorblind players
- * get nothing from the hue at all.
+/* ---------- ownership, layer 2: the owner chip ----------
+ * A seat-colour chip carrying the owner's initial in ink chosen by luminance
+ * (ui.js inkOn). The initial is what makes the board unambiguous: two seats can
+ * sit close together on the colour wheel, and colour-blind players get nothing
+ * from the hue at all.
  *
- * It lives inside .tile__card, so it lands on the inner edge of all four board
- * sides for free. It scales up from the rim on purchase rather than appearing,
- * which is what makes a plot changing hands read as an event. */
+ * It used to be a full-width band pinned to the outer rim, which sat on top of
+ * the flag badge and price and forced the footer to pad itself out of the way.
+ * It is now a flex item INSIDE the footer, sharing the row with the flag and
+ * the rent, so the three can never overlap on any board size or any edge. */
 .tile__owner {
-  position: absolute;
-  /* Outer rim, just inside the country strip. It used to sit on the inner rim,
-     which put it straight over the flag banner — the flag is how you recognise
-     the country, so the owner plate has no business covering it. */
-  top: auto;
-  bottom: 4px;
-  left: 0;
-  right: 0;
-  height: 12%;
-  min-height: 11px;
-  display: flex;
+  flex: 0 0 auto;
+  display: none;
   align-items: center;
-  /* Content sits at one end of the band, not the middle: the 3D houses anchor
-     to the centre of the banner this plate overlaps, so a centred tag would be
-     buried under the buildings on exactly the tiles that matter most. */
-  justify-content: flex-end;
-  gap: 0.3em;
-  padding-inline: 0.5em;
+  gap: 0.1em;
+  height: 1.5em;
+  min-width: 1.45em;
+  padding-inline: 0.26em;
+  border-radius: 5px;
   overflow: hidden;
   color: var(--oc-ink, #fff);
-  /* the cqw term keeps the tag proportional to the board; the rem cap stops it
-     outgrowing the plate on a very large board */
-  font-size: min(clamp(0.5rem, 0.72vw, 0.72rem), 1.15cqw);
-  font-weight: 800;
-  letter-spacing: 0.06em;
+  font-size: min(clamp(0.55rem, 0.8vw, 0.8rem), 1.15cqw);
+  font-weight: 900;
+  letter-spacing: 0.02em;
   line-height: 1;
   text-shadow: none;
-  transform: scaleY(0);
-  transform-origin: bottom center;
-  transition: transform 260ms cubic-bezier(0.34, 1.35, 0.64, 1), background-color 200ms ease;
-  z-index: 3;
+  justify-content: center;
 }
-
-/* keep the price clear of the plate rather than letting it sit underneath.
-   The inverted top row pads the other side, and must come second — equal
-   specificity, so source order decides which wins. */
-.tile.is-owned .tile__footer { padding-bottom: 13%; }
-.tile-top.is-owned .tile__footer { padding-bottom: 0; padding-top: 13%; }
 
 .tile.is-owned .tile__owner {
+  display: inline-flex;
   background-color: var(--oc);
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(0, 0, 0, 0.18));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 2px 8px var(--oc-55, transparent);
-  transform: scaleY(1);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.26), rgba(0, 0, 0, 0.2));
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35), 0 1px 5px var(--oc-55, transparent);
+  animation: own-pop 300ms cubic-bezier(0.34, 1.45, 0.64, 1);
 }
 
-/* inverted top row: light the plate from below instead, so every plate on the
-   board looks lit from the same direction on screen. Must follow the rule
-   above � same specificity, so source order decides. */
-.tile-top.is-owned .tile__owner {
-  background-image: linear-gradient(0deg, rgba(255, 255, 255, 0.24), rgba(0, 0, 0, 0.18));
-  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.4), 0 -2px 8px var(--oc-55, transparent);
+@keyframes own-pop {
+  0% { transform: scale(0.1); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
 }
+
+/* ---------- ownership, layer 4: the seat-colour rail ----------
+   A solid bar of the owner's colour replacing the neutral group strip on the
+   outer edge. Readable from across the room, and it costs no tile space. */
+.tile.is-owned .tile__group {
+  background: var(--oc) !important;
+  height: 6px;
+  box-shadow: 0 0 10px -2px var(--oc-glow, transparent);
+}
+
+.tile.is-monopoly .tile__group { height: 8px; }
 
 /* ---------- mortgaged: owned, but earning nothing ----------
-   Read as a plot with the lights off: the seat colour drains out of the plate
-   and a diagonal hatch crosses the card, so it is obvious at board distance
-   why landing here was free. */
-.tile.is-hocked .tile__owner {
-  background-image: repeating-linear-gradient(135deg,
-    rgba(0, 0, 0, 0.42) 0 3px, rgba(255, 255, 255, 0.14) 3px 6px);
-  filter: saturate(0.35) brightness(0.8);
+   Read as a plot with the lights off: the chip drains out, a hatch crosses the
+   whole card and a plain-language stamp sits on the plot. You should never have
+   to open a manager to find out why landing on someone's city was free. */
+.tile__mtg {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 4;
+  pointer-events: none;
+  background: repeating-linear-gradient(135deg,
+    rgba(0, 0, 0, 0.5) 0 5px, rgba(0, 0, 0, 0) 5px 11px);
 }
 
+.tile.is-hocked .tile__mtg { display: flex; }
+
+.tile__mtg b {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22em;
+  padding: 0.14em 0.42em;
+  border-radius: 4px;
+  background: rgba(10, 13, 18, 0.9);
+  border: 1px solid rgba(240, 182, 74, 0.6);
+  color: var(--gold);
+  font-size: min(clamp(0.42rem, 0.6vw, 0.6rem), 0.92cqw);
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transform: rotate(-13deg);
+  white-space: nowrap;
+}
+
+.tile__mtg .ic { width: 1.05em; height: 1.05em; }
+
+.tile.is-hocked .tile__owner {
+  background-image: repeating-linear-gradient(135deg,
+    rgba(0, 0, 0, 0.45) 0 3px, rgba(255, 255, 255, 0.16) 3px 6px);
+  filter: saturate(0.3) brightness(0.78);
+}
+
+.tile.is-hocked .tile__group { filter: saturate(0.25) brightness(0.7); }
+
 .tile.is-hocked .tile__tint {
-  opacity: 0.55;
-  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.14);
+  opacity: 0.5;
 }
 
 .tile.is-hocked .tile__price--rent {
@@ -484,13 +465,34 @@ body {
   text-decoration-thickness: 1px;
 }
 
-/* crown only once the whole country is theirs */
-.tile__crown { display: none; }
-.tile__crown .ic { width: 1.2em; height: 1.2em; }
-.tile.is-monopoly .tile__crown { display: inline-flex; }
-.tile.is-monopoly .tile__owner { height: 14%; }
+/* A full set is signalled by the thicker seat-colour rail and a gold ring on the
+   chip, not by a crown glyph. The crown was ~11px of a ~65px footer, which is
+   what pushed a four-figure rent off the end of the tile. */
+.tile__crown { display: none !important; }
+.tile.is-monopoly .tile__owner {
+  box-shadow: inset 0 0 0 1.5px var(--gold), 0 1px 6px var(--oc-55, transparent);
+}
 
 .tile__ownertag:empty { display: none; }
+
+/* ---------- your own plots are clickable ----------
+   Building, mortgaging and selling happen on the board itself, so a plot you
+   can act on has to look like a control. */
+.tile.is-mine { cursor: pointer; }
+.tile.is-mine:hover { box-shadow: inset 0 0 0 2px var(--oc-55, rgba(240, 182, 74, 0.5)); }
+
+.tile.is-actionable::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 2px var(--gold);
+  border-radius: 4px;
+  animation: tile-can 1.8s ease-in-out infinite;
+  z-index: 5;
+}
+
+@keyframes tile-can { 50% { box-shadow: inset 0 0 0 2px rgba(240, 182, 74, 0.25); } }
 
 .tile__sub {
   flex: 0 0 auto;
@@ -535,66 +537,162 @@ body {
 
 /* ---------- board center ---------- */
 
+/* ---------------------------------------------------------------------------
+   THE CENTRE HUD
+   Everything you act on lives in the middle of the table: who is on turn, the
+   dice tray, the action buttons and the action log. The old bottom bar meant
+   your eyes had to leave the board to roll, and the log was off in a side
+   column where nobody read it. Four stacked rows, the dice tray taking
+   whatever height is left over.
+   ------------------------------------------------------------------------ */
+
 .board-center {
   grid-row: 2 / 11;
   grid-column: 2 / 11;
   position: relative;
   border-radius: 8px;
   background:
-    radial-gradient(ellipse at 50% 40%, rgba(240, 182, 74, 0.06), transparent 65%),
+    radial-gradient(ellipse at 50% 34%, rgba(240, 182, 74, 0.055), transparent 66%),
     linear-gradient(160deg, #161c25, #10151c);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  display: grid;
+  /* The log row is sized here rather than with a height on .hud-log itself: a
+     percentage height inside an `auto` grid row resolves against a row that is
+     sized by its content, which is circular — the log collapsed to a sliver. */
+  grid-template-rows: auto minmax(0, 1fr) auto minmax(84px, 30%);
+  gap: 0.6cqw;
+  padding: 1.1cqw;
+  overflow: hidden;
+  container-type: inline-size;
+  container-name: hud;
+}
+
+/* --- row 1: whose turn it is, impossible to miss --- */
+
+.hud-turn {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 0.9cqw;
+  padding: 0.75cqw 1cqw;
+  border-radius: 10px;
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* the seat colour rail — the single loudest turn cue on screen */
+.hud-turn__bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--pc, transparent);
+  box-shadow: 0 0 14px var(--pc-55, transparent);
+}
+
+.hud-turn.is-mine {
+  background: linear-gradient(100deg, var(--pc-14, rgba(240, 182, 74, 0.12)), rgba(255, 255, 255, 0.015));
+  box-shadow: inset 0 0 0 1px var(--pc-50, rgba(240, 182, 74, 0.4));
+  animation: hud-mine 2.6s ease-in-out infinite;
+}
+
+@keyframes hud-mine {
+  50% { box-shadow: inset 0 0 0 1px var(--pc-50, rgba(240, 182, 74, 0.4)), 0 0 22px -6px var(--pc-50, transparent); }
+}
+
+.hud-turn__seat { display: flex; flex: 0 0 auto; }
+.hud-turn__seat .ptoken {
+  width: max(30px, 3.6cqw);
+  height: max(30px, 3.6cqw);
+}
+
+.hud-turn__tx { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; gap: 1px; }
+
+.hud-turn__name {
+  font-size: clamp(13px, 2.5cqw, 27px);
+  font-weight: 900;
+  line-height: 1.05;
+  letter-spacing: 0.01em;
+  color: var(--cream);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hud-turn.is-mine .hud-turn__name { color: #fff; }
+
+.hud-turn__sub {
+  font-size: clamp(8.5px, 1.22cqw, 13px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hud-turn.is-mine .hud-turn__sub { color: var(--gold); }
+
+.hud-turn__side { display: flex; align-items: center; gap: 0.5cqw; flex: 0 0 auto; }
+
+.hud-round {
+  font-size: clamp(8.5px, 1.2cqw, 13px);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  color: #6b7889;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* --- row 2: the dice tray. Confining the canvas here is what keeps the dice
+   off the buttons and the log — they used to tumble across the whole centre. */
+
+.hud-dice {
+  position: relative;
+  min-height: 0;
+  border-radius: 10px;
   overflow: hidden;
 }
 
-/* Pinned to the upper third rather than flex-centred: the dice settle around
-   the middle of the centre panel, and a dead-centre logo just becomes something
-   for them to land on top of. */
 .board-logo {
   position: absolute;
-  top: 11%;
-  left: 50%;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.4cqw;
-  transform: translateX(-50%) rotate(-6deg);
-  opacity: 0.78;
+  justify-content: center;
+  gap: 0.1cqw;
+  opacity: 0.16;
   pointer-events: none;
+  transform: rotate(-5deg);
 }
 
 .board-logo-top,
 .board-logo-bottom {
-  font-size: clamp(14px, 4.6cqw, 64px);
+  font-size: clamp(13px, 5.4cqw, 62px);
   font-weight: 900;
-  letter-spacing: 0.12em;
-  line-height: 0.95;
+  letter-spacing: 0.14em;
+  line-height: 0.92;
 }
 
 .board-logo-bottom { color: var(--gold); }
 
-.board-logo-sub {
-  font-size: clamp(6px, 1.02cqw, 13px);
-  color: var(--muted);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  margin-top: 0.6cqw;
-}
-
 .last-roll {
   position: absolute;
-  top: 4%;
+  top: 3%;
   left: 50%;
   transform: translateX(-50%);
-  font-size: clamp(9px, 1.5cqw, 20px);
+  font-size: clamp(9px, 1.6cqw, 20px);
   font-weight: 800;
   color: var(--cream);
-  background: rgba(8, 11, 16, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  padding: 0.32em 0.9em;
+  background: rgba(8, 11, 16, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  padding: 0.3em 0.9em;
   border-radius: 999px;
   opacity: 0;
   transition: opacity 250ms ease;
@@ -613,16 +711,113 @@ body {
   pointer-events: none;
   z-index: 5;
 }
+
+/* --- row 3: status + the action buttons, dead centre of the table --- */
+
+.hud-act { display: flex; flex-direction: column; gap: 0.5cqw; align-items: center; }
+
+.hud-status {
+  font-size: clamp(9.5px, 1.35cqw, 14px);
+  font-weight: 600;
+  color: var(--muted);
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hud-status strong { color: var(--cream); }
+
+.hud-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.55cqw;
+  width: 100%;
+}
+
+.hud-buttons .btn {
+  font-size: clamp(10px, 1.3cqw, 14px);
+  padding: 0.55em 1em;
+  border-radius: 8px;
+}
+
+.hud-buttons .btn-roll {
+  font-size: clamp(11px, 1.65cqw, 17px);
+  padding: 0.6em 1.5em;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+/* the roll button breathes when the table is waiting on you */
+.hud-buttons .btn-roll:not(:disabled) { animation: roll-ready 2.2s ease-in-out infinite; }
+
+@keyframes roll-ready {
+  50% { box-shadow: 0 0 0 5px rgba(240, 182, 74, 0.13); }
+}
+
+/* --- row 4: the action log, in the middle where it gets read --- */
+
+.hud-log {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+
+.hud-log__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.5cqw 0.8cqw 0.35cqw;
+  font-size: clamp(7.5px, 1cqw, 10.5px);
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #64717f;
+}
+
+.hud-log__ic { display: flex; }
+.hud-log__ic .ic { width: 1.2em; height: 1.2em; }
+
+/* the kafana pot, right where the money is being talked about */
+.hud-pot {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(240, 182, 74, 0.13);
+  border: 1px solid rgba(240, 182, 74, 0.35);
+  color: var(--gold);
+  letter-spacing: 0.08em;
+}
+
+.hud-pot__ic { display: flex; }
+.hud-pot__ic .ic { width: 1.1em; height: 1.1em; }
+.hud-pot b { font-variant-numeric: tabular-nums; }
+
+.hud-log .log-list {
+  flex: 1 1 auto;
+  padding: 0 0.8cqw 0.5cqw;
+  font-size: clamp(8.5px, 1.12cqw, 12.5px);
+}
 /* ---------- pawns ---------- */
 
 .pawn-layer { position: absolute; inset: 0; pointer-events: none; z-index: 7; }
 
 .pawn {
   position: absolute;
-  /* up from 3.3cqw: the tokens are the thing you track around the board, and
-     they were losing out to the tile art at normal board sizes */
-  width: max(32px, 4cqw);
-  height: max(32px, 4cqw);
+  /* up again from 4cqw: the tokens are the thing you track around the board and
+     they still read small next to the tile art on a large screen */
+  width: max(38px, 5cqw);
+  height: max(38px, 5cqw);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -663,35 +858,6 @@ body {
 }
 
 .meeple .ic { width: 62%; height: 62%; color: rgba(255, 255, 255, 0.95); }
-
-/* ---------- action bar ---------- */
-
-.action-bar {
-  flex: 0 0 auto;
-  height: 8vh;
-  min-height: 54px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 clamp(10px, 1.4vw, 24px);
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(9, 12, 17, 0.55);
-}
-
-.action-status {
-  font-size: clamp(11px, 1.05vw, 14px);
-  font-weight: 600;
-  color: var(--muted);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.action-status strong { color: var(--cream); }
-
-.action-buttons { display: flex; gap: 8px; flex: 0 0 auto; }
 
 /* ---------- buttons ---------- */
 
@@ -786,7 +952,35 @@ body {
 }
 
 .panel-players { flex: 1 1 auto; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
-.panel-log { flex: 0 0 auto; height: 34%; }
+
+/* ---------------------------------------------------------------------------
+   PROPERTY INSPECTOR
+   The deed used to be a tooltip that opened over the board, so the moment you
+   hovered a plot you lost sight of the houses and pawns standing on it. It now
+   renders in its own column instead: nothing is ever covered, it can hold real
+   buttons, and it stays put while you read it.
+   ------------------------------------------------------------------------ */
+
+.panel-inspect { flex: 0 0 auto; max-height: 56%; min-height: 0; }
+
+.inspect-slot {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 10px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: #2e3945 transparent;
+}
+
+.inspect-slot::-webkit-scrollbar { width: 6px; }
+.inspect-slot::-webkit-scrollbar-thumb { background: #2e3945; border-radius: 3px; }
+
+.inspect-empty {
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #5f6b7c;
+  padding: 6px 4px;
+}
 
 .player-list,
 .log-list {
@@ -1626,8 +1820,10 @@ body {
   .panel-title { padding: 9px 12px 6px; }
   .pl { padding: 7px 8px 8px 10px; }
   .pl__meta { margin-left: 28px; }
-  .action-bar { min-height: 48px; }
   .trade-columns { grid-template-columns: 1fr; }
+  /* the trade dock stops earning its column on a narrow screen */
+  .left-dock { flex-basis: 0; width: 0; padding: 0; border-right: none; }
+  .panel-inspect { max-height: 50%; }
 }
 
 /* ============================================================
@@ -2030,19 +2226,39 @@ body {
    LEFT DOCK � incoming trade cards + collapsible session log
    ============================================================ */
 
+/* A real column, not a floating overlay.
+ *
+ * It used to be position:fixed over the left edge of the screen, which put trade
+ * cards and the session log straight on top of the left column of tiles — the
+ * board is centred and there is nowhere near 280px of empty gutter beside it. As
+ * a flex column it costs the board nothing on any normal screen (the board is
+ * capped by viewport HEIGHT long before width becomes the binding constraint)
+ * and it can never cover a tile, a pawn or a house. */
 .left-dock {
-  position: fixed;
-  left: clamp(8px, 1vw, 18px);
-  top: 12vh;
-  bottom: 12vh;
-  width: clamp(232px, 19vw, 290px);
-  z-index: 60;
+  order: -1;
+  flex: 0 0 clamp(186px, 15.5vw, 250px);
+  width: clamp(186px, 15.5vw, 250px);
+  height: 100vh;
+  padding: 10px 8px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 10px;
-  pointer-events: none; /* children opt back in */
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.014), transparent);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
 }
+
+/* nothing to show yet? give the space back to the board */
+.left-dock.is-empty {
+  flex-basis: 0;
+  width: 0;
+  padding: 0;
+  border-right: none;
+}
+
+.left-dock .trade-dock { flex: 1 1 auto; }
+.left-dock .session-log { flex: 0 0 auto; }
 
 .trade-dock {
   display: flex;
@@ -2516,13 +2732,10 @@ body {
 }
 
 /* ============================================================
-   Transport state on the room chip
+   Transport state on the invite chip
    ============================================================ */
 
-.room-chip.is-reconnecting {
-  background: rgba(245, 158, 11, 0.12);
-  border-color: rgba(245, 158, 11, 0.5);
-  color: #fbbf24;
+.invite-chip.is-reconnecting {
   letter-spacing: 0.06em;
   cursor: default;
   animation: reconnect-pulse 1.1s ease-in-out infinite;
@@ -2708,4 +2921,356 @@ body {
 
 @keyframes doing-time {
   50% { box-shadow: 0 0 0 2px rgba(176, 188, 204, 0.75), 0 4px 10px rgba(0, 0, 0, 0.6); }
+}
+
+/* ============================================================
+   KAFANA POT ON THE BOARD
+   Taxes and fines disappearing into a pot and reappearing in
+   somebody's balance five turns later is invisible bookkeeping.
+   The prize sits on the tile it will be won from.
+   ============================================================ */
+
+.tile--corner-kafana .tile__sub {
+  font-size: min(clamp(0.46rem, 0.66vw, 0.66rem), 0.95cqw);
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+
+.tile--corner-kafana.has-pot .tile__sub {
+  color: #0b0f16;
+  background: linear-gradient(180deg, var(--gold), var(--gold-2));
+  border-radius: 999px;
+  margin: 0 8%;
+  padding: 0.18em 0.3em;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 10px -2px rgba(240, 182, 74, 0.8);
+  animation: pot-glow 2.4s ease-in-out infinite;
+}
+
+@keyframes pot-glow {
+  50% { box-shadow: 0 2px 18px 0 rgba(240, 182, 74, 0.75); }
+}
+
+.tile--corner-kafana.has-pot .tile__figure {
+  color: var(--gold);
+  background: rgba(240, 182, 74, 0.14);
+}
+
+/* ============================================================
+   INVITE: room code + shareable link
+   ============================================================ */
+
+.invite-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 7px;
+  background: rgba(240, 182, 74, 0.1);
+  border: 1px solid rgba(240, 182, 74, 0.35);
+  color: var(--gold);
+  font-family: inherit;
+  font-size: clamp(10px, 0.9vw, 13px);
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.invite-chip:hover { background: rgba(240, 182, 74, 0.2); }
+.invite-chip__ic { display: flex; }
+.invite-chip__ic .ic { width: 13px; height: 13px; }
+.invite-chip b { letter-spacing: 0.2em; }
+
+.invite-chip__hint {
+  font-weight: 700;
+  font-size: 0.82em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(240, 182, 74, 0.6);
+}
+
+.invite-chip.is-copied { background: rgba(46, 204, 113, 0.18); border-color: rgba(46, 204, 113, 0.5); color: #6ee7a8; }
+
+.invite-chip.is-reconnecting {
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.45);
+  color: #fbbf24;
+}
+
+.invite-row,
+.rename-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.invite-link,
+.rename-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #10151c;
+  color: var(--cream);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  outline: none;
+}
+
+.invite-link { color: #9fb4cc; font-size: 11.5px; }
+.invite-link:focus,
+.rename-input:focus { border-color: var(--gold); }
+
+.invite-row .btn,
+.rename-row .btn { flex: 0 0 auto; }
+
+/* ============================================================
+   TRADE: player picker (replaces the native <select>)
+   A native dropdown draws its popup with the platform palette, which on
+   Windows meant near-white text on a white popup — unreadable. Chips carry
+   the seat colour, the token and the balance, and cannot be restyled out
+   from under us.
+   ============================================================ */
+
+.trade-party--pick { flex-direction: column; align-items: stretch; gap: 6px; }
+
+.party-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.party-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px 5px 5px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #171d27;
+  color: #c9d1dd;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.party-opt .ptoken { width: 20px; height: 20px; }
+.party-opt em { font-style: normal; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.party-opt:hover { background: #1f2733; color: var(--cream); }
+
+.party-opt.is-active {
+  border-color: var(--po, var(--gold));
+  background: color-mix(in srgb, var(--po, #f0b64a) 18%, #171d27);
+  color: #fff;
+}
+
+.party-opt.is-active em { color: rgba(255, 255, 255, 0.75); }
+
+.trade-warn {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.32);
+  color: #fca5a5;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* ============================================================
+   RAISE CASH sheet, inlined into the buy + debt modals
+   Nothing is ever sold for a player, so every prompt that can be
+   blocked by a shortfall carries the means to fix it.
+   ============================================================ */
+
+.raise-box {
+  margin: 12px 0 4px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #10151c;
+  overflow: hidden;
+  text-align: left;
+}
+
+.raise-box__head {
+  padding: 7px 10px;
+  font-size: 9.5px;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #6f7c8f;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.raise-list {
+  max-height: 190px;
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #2e3945 transparent;
+}
+
+.raise-list::-webkit-scrollbar { width: 6px; }
+.raise-list::-webkit-scrollbar-thumb { background: #2e3945; border-radius: 3px; }
+
+.raise-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px;
+  border-radius: 7px;
+  background: #171d27;
+}
+
+.raise-row__c { width: 6px; height: 22px; border-radius: 3px; flex: 0 0 auto; }
+.raise-row__n { flex: 1 1 auto; min-width: 0; font-size: 12.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.raise-row__n small { display: block; font-size: 10.5px; font-weight: 600; color: var(--muted); }
+.raise-row__acts { display: inline-flex; gap: 4px; flex: 0 0 auto; }
+.raise-row__acts .build-row__btn {
+  width: auto;
+  gap: 3px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.raise-none { padding: 10px; font-size: 12px; color: var(--muted); font-style: italic; }
+
+/* ============================================================
+   PROPERTY INSPECTOR: the deed, docked in the side column
+   ============================================================ */
+
+.inspect-slot .deed {
+  position: static;
+  width: 100%;
+  max-width: none;
+  opacity: 1;
+  visibility: visible;
+  box-shadow: none;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.deed-acts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  padding: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.deed-acts .btn {
+  padding: 0.5em 0.5em;
+  font-size: 11.5px;
+  gap: 5px;
+  border-radius: 7px;
+}
+
+.deed-acts .btn--wide { grid-column: 1 / -1; }
+.deed-acts .btn .ic { width: 12px; height: 12px; }
+.deed-acts__note {
+  grid-column: 1 / -1;
+  font-size: 10.5px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.4;
+}
+
+/* ============================================================
+   MATCH SETTINGS viewer (in-game, read-only)
+   ============================================================ */
+
+.modal-rules { width: min(460px, 92vw); text-align: left; }
+.modal-rules .modal-title, .modal-rules .modal-note, .modal-rules .modal-card-icon { text-align: center; }
+.modal-rules .modal-card-icon { margin-inline: auto; }
+
+.rules-view {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 12px 0 4px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #10151c;
+  padding: 6px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.rules-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+
+.rules-row:nth-child(odd) { background: rgba(255, 255, 255, 0.02); }
+.rules-row span { flex: 1 1 auto; color: #b8c2d0; }
+.rules-row b { flex: 0 0 auto; font-weight: 800; color: var(--cream); font-variant-numeric: tabular-nums; }
+.rules-row b.is-on { color: var(--green); }
+.rules-row b.is-off { color: #6d798a; }
+
+/* ============================================================
+   TRADE CARDS: spectator copies
+   Every seat sees an offer go out. Only the two parties can act on it, so
+   everyone else gets the same card with the buttons replaced by a status
+   line — no more silent deals nobody else knew about.
+   ============================================================ */
+
+.trade-card.is-spectator { opacity: 0.86; border-style: dashed; }
+.trade-card.is-spectator .tc-col--get { background: rgba(255, 255, 255, 0.02); }
+.trade-card.is-spectator .tc-col--give { background: rgba(255, 255, 255, 0.02); }
+
+.tc-watch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tc-watch .ic { width: 12px; height: 12px; }
+
+.tc-me {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: rgba(240, 182, 74, 0.14);
+  color: var(--gold);
+  font-size: 9.5px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+}
+
+/* ============================================================
+   SETTINGS: wide block + inline hint
+   ============================================================ */
+
+.set-block--wide { grid-column: 1 / -1; }
+
+.field__hint {
+  font-style: normal;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #5f6b7c;
+  margin-left: 6px;
 }

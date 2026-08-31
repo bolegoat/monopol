@@ -96,10 +96,14 @@
     {
       key: "shield", tint: "#b48cf2", title: "Customs Inspection",
       text: "The trunk does not match the manifest, cousin. The inspector proposes a deal:",
+      /* Neither option is ever locked out. Paying more than you hold simply
+       * raises a debt you settle by hand, which is a real choice — greying the
+       * button out used to hide that option from exactly the players who most
+       * needed to weigh it. */
       choicesFn(game, p) {
         const fee = 50 * TILES.filter((t) => t.kind === "airport" && game.props[t.id].owner === p.id).length;
         return [
-          { id: "pay", label: `Pay ${fmt(fee)} fine`, disabled: p.cash < fee && !canLiquidate(game, p, fee) },
+          { id: "pay", label: fee > 0 ? `Pay ${fmt(fee)} fine` : "Nothing to declare" },
           { id: "skip", label: "Forfeit next turn" },
         ];
       },
@@ -219,17 +223,6 @@
       apply(game, p) { p.cash += 70; },
     },
   ];
-
-  /** Can forced liquidation (houses then deeds) plausibly cover `amount`? */
-  function canLiquidate(game, p, amount) {
-    let pool = p.cash;
-    for (const t of game.ownedTiles(p)) {
-      const h = game.props[t.id].houses || 0;
-      if (h > 0) pool += h * Math.round(t.houseCost * ECONOMY.sellRate);
-      else pool += Math.round(t.price * ECONOMY.sellRate);
-    }
-    return pool >= amount;
-  }
 
   window.BT = Object.assign(window.BT || {}, { CARDS: { SURPRISE, EVENT } });
 })();

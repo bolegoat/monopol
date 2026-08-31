@@ -19,8 +19,21 @@
   const DEFAULT_SETTINGS = {
     startCash: 1500,
     maxPlayers: 4,
-    turnTimer: 45, // seconds, null = unlimited
-    rules: { kafanaJackpot: true, doubleRent: true, auctions: true },
+    turnTimer: null, // seconds, null = unlimited. Default is fully manual play:
+                     // a clock that plays your turn for you is the opposite of
+                     // what most tables want, so it is opt-in.
+    goReward: 200,
+    jailFee: 50,
+    maxRounds: 60,
+    rules: {
+      kafanaJackpot: true,
+      doubleRent: true,
+      auctions: false,
+      mortgages: true,
+      evenBuild: true,
+      rentInJail: true,
+      buildAnytime: true,
+    },
   };
 
   const NAMES = ["Player 1", "Player 2", "Player 3", "Player 4", "Player 5", "Player 6"];
@@ -43,11 +56,31 @@
   const PANES = ["pane-home", "pane-create", "pane-join", "pane-local", "pane-room"];
 
   function switchPane(id) {
+    // one settings form is shared by the create pane, the staging room and the
+    // local hot-seat pane, so make sure it is parented where it is about to be
+    // shown before we reveal anything
+    if (id === "pane-create") {
+      const grid = $("#settings-grid");
+      const host = $("#pane-create");
+      if (grid && grid.parentElement !== host) host.insertBefore(grid, $("#menu-error"));
+      const slot = $("#local-rules-slot");
+      if (slot) slot.hidden = true;
+    }
     for (const p of PANES) show($("#" + p), p === id);
   }
 
+  /** The nickname to seat under, from whichever pane the player is looking at. */
+  function nickname() {
+    const join = $("#join-nick");
+    const onJoin = $("#pane-join") && !$("#pane-join").hidden;
+    const raw = onJoin && join && join.value.trim()
+      ? join.value
+      : $("#menu-nick").value;
+    return (raw || "").trim().slice(0, 14);
+  }
+
   function profile() {
-    return { name: ($("#menu-nick").value || "").trim().slice(0, 14) || "Player" };
+    return { name: nickname() || "Player" };
   }
 
   function readSettingsFromDOM() {
@@ -62,36 +95,73 @@
 
   /* ================= match settings binding ================= */
 
+  /* Numeric chip/segment groups: element id -> settings key. */
+  const CHIP_SETS = [
+    ["#set-cash", "startCash", ".chip"],
+    ["#set-max", "maxPlayers", ".seg"],
+    ["#set-go", "goReward", ".chip"],
+    ["#set-bail", "jailFee", ".chip"],
+  ];
+
+  const TOGGLES = [
+    ["rule-jackpot", "kafanaJackpot"],
+    ["rule-double", "doubleRent"],
+    ["rule-auction", "auctions"],
+    ["rule-mortgage", "mortgages"],
+    ["rule-even", "evenBuild"],
+    ["rule-jailrent", "rentInJail"],
+    ["rule-anytime", "buildAnytime"],
+  ];
+
+  /**
+   * May the settings be edited right now?
+   *
+   * This used to be a plain `state.isHost`, which is false until a room snapshot
+   * comes back — so on the Create pane, before the room exists, every chip and
+   * every switch was inert. You set up the match and nothing you clicked stuck.
+   * Outside a room there is no host to be: whoever is looking at the form owns it.
+   */
+  const settingsEditable = () => !state.inRoom || state.isHost;
+
+  /** Push settings to the relay if we are in a live room. */
+  function pushSettings() {
+    if (state.inRoom) cb.sendSettings(readSettingsFromDOM());
+  }
+
   function bindSettings() {
-    $("#set-cash").addEventListener("click", (e) => {
-      const b = e.target.closest(".chip");
-      if (!b || !state.isHost) return;
-      state.settings.startCash = Number(b.dataset.v);
-      renderSettings();
-      if (state.inRoom) cb.sendSettings(readSettingsFromDOM());
-    });
-    $("#set-max").addEventListener("click", (e) => {
-      const b = e.target.closest(".seg");
-      if (!b || !state.isHost) return;
-      state.settings.maxPlayers = Number(b.dataset.v);
-      renderSettings();
-      if (state.inRoom) cb.sendSettings(readSettingsFromDOM());
-    });
+    for (const [sel, key, itemSel] of CHIP_SETS) {
+      const box = $(sel);
+      if (!box) continue;
+      box.addEventListener("click", (e) => {
+        const b = e.target.closest(itemSel);
+        if (!b || !settingsEditable()) return;
+        state.settings[key] = Number(b.dataset.v);
+        renderSettings();
+        pushSettings();
+      });
+    }
+
     $("#set-timer").addEventListener("change", (e) => {
-      if (!state.isHost) return;
+      if (!settingsEditable()) return;
       state.settings.turnTimer = e.target.value === "" ? null : Number(e.target.value);
       renderSettings();
-      if (state.inRoom) cb.sendSettings(readSettingsFromDOM());
+      pushSettings();
     });
-    for (const [id, key] of [
-      ["rule-jackpot", "kafanaJackpot"],
-      ["rule-double", "doubleRent"],
-      ["rule-auction", "auctions"],
-    ]) {
-      $("#" + id).addEventListener("change", (e) => {
-        if (!state.isHost) return;
+
+    $("#set-rounds").addEventListener("change", (e) => {
+      if (!settingsEditable()) return;
+      state.settings.maxRounds = Number(e.target.value);
+      renderSettings();
+      pushSettings();
+    });
+
+    for (const [id, key] of TOGGLES) {
+      const el = $("#" + id);
+      if (!el) continue;
+      el.addEventListener("change", (e) => {
+        if (!settingsEditable()) { e.target.checked = Boolean(state.settings.rules[key]); return; }
         state.settings.rules[key] = e.target.checked;
-        if (state.inRoom) cb.sendSettings(readSettingsFromDOM());
+        pushSettings();
       });
     }
   }
@@ -99,21 +169,24 @@
   /** Reflect state.settings onto the shared settings-grid DOM. */
   function renderSettings() {
     const s = state.settings;
-    document.querySelectorAll("#set-cash .chip").forEach((b) =>
-      b.classList.toggle("is-active", Number(b.dataset.v) === Number(s.startCash)));
-    document.querySelectorAll("#set-max .seg").forEach((b) =>
-      b.classList.toggle("is-active", Number(b.dataset.v) === Number(s.maxPlayers)));
+    for (const [sel, key, itemSel] of CHIP_SETS) {
+      document.querySelectorAll(sel + " " + itemSel).forEach((b) =>
+        b.classList.toggle("is-active", Number(b.dataset.v) === Number(s[key])));
+    }
     $("#set-timer").value = s.turnTimer == null ? "" : String(s.turnTimer);
-    $("#rule-jackpot").checked = Boolean(s.rules.kafanaJackpot);
-    $("#rule-double").checked = Boolean(s.rules.doubleRent);
-    $("#rule-auction").checked = Boolean(s.rules.auctions);
+    $("#set-rounds").value = String(s.maxRounds == null ? 60 : s.maxRounds);
+    for (const [id, key] of TOGGLES) {
+      const el = $("#" + id);
+      if (el) el.checked = Boolean(s.rules[key]);
+    }
 
     const grid = $("#settings-grid");
     grid.classList.toggle("is-readonly", state.inRoom && !state.isHost);
     grid.classList.toggle("is-live", state.inRoom && state.isHost);
-    const editable = !state.inRoom || state.isHost;
-    ["#set-timer", "#rule-jackpot", "#rule-double", "#rule-auction"].forEach((sel) => {
-      $(sel).disabled = !editable;
+    const editable = settingsEditable();
+    ["#set-timer", "#set-rounds"].concat(TOGGLES.map(([id]) => "#" + id)).forEach((sel) => {
+      const el = $(sel);
+      if (el) el.disabled = !editable;
     });
   }
 
@@ -269,6 +342,16 @@
       codeBtn.dataset.code = room.code;
       codeBtn.textContent = room.code;
     }
+    // the shareable link, so nobody has to read five characters down a phone
+    const link = $("#invite-link");
+    if (link) link.value = window.BT.UI.inviteUrl(room.code);
+
+    // keep the rename field showing the name we are actually seated under,
+    // unless it is being typed in right now
+    const nick = $("#stage-nick");
+    const me = room.players.find((p) => p.id === state.myId);
+    if (nick && me && document.activeElement !== nick) nick.value = me.name;
+
     $("#settings-hint").textContent = state.isHost ? "you control these" : "host-controlled";
     renderRoster();
     renderPickers();
@@ -294,8 +377,21 @@
 
     try {
       const savedNick = localStorage.getItem("bt_nick");
-      if (savedNick) $("#menu-nick").value = savedNick;
+      if (savedNick) {
+        $("#menu-nick").value = savedNick;
+        $("#join-nick").value = savedNick;
+      }
     } catch (e) { /* ignore */ }
+
+    // keep the two nickname fields in step so it never matters which you typed in
+    const mirror = (from, to) => $(from).addEventListener("input", () => {
+      $(to).value = $(from).value;
+    });
+    mirror("#menu-nick", "#join-nick");
+    mirror("#join-nick", "#menu-nick");
+    $("#join-nick").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") $("#menu-code").focus();
+    });
 
     /* navigation */
     $("#btn-path-create").addEventListener("click", () => { switchPane("pane-create"); error("#menu-error", ""); });
@@ -366,6 +462,55 @@
       $("#room-code-big").textContent = "COPIED";
       setTimeout(() => { $("#room-code-big").textContent = code || ""; }, 900);
     });
+    $("#btn-copy-link").addEventListener("click", () => {
+      const input = $("#invite-link");
+      const btn = $("#btn-copy-link");
+      if (!input || !input.value) return;
+      const done = () => {
+        btn.innerHTML = icon("check") + "Copied";
+        setTimeout(() => { btn.innerHTML = icon("link") + "Copy link"; }, 1300);
+      };
+      if (navigator.clipboard) navigator.clipboard.writeText(input.value).then(done, done);
+      else { input.select(); done(); }
+    });
+
+    /* Rename after joining. You land in somebody's room as "Player", and until
+     * now the only way to fix that was to leave and come back. */
+    const doRename = () => {
+      const input = $("#stage-nick");
+      const name = (input.value || "").trim().slice(0, 14);
+      if (!name) return;
+      try { localStorage.setItem("bt_nick", name); } catch (e) { /* private mode */ }
+      $("#menu-nick").value = name;
+      cb.setName(name);
+    };
+    $("#btn-rename").addEventListener("click", doRename);
+    $("#stage-nick").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); doRename(); }
+    });
+
+    /* Local hot-seat games get the same house rules form, folded away. */
+    $("#btn-local-rules").addEventListener("click", () => {
+      const pane = $("#pane-local");
+      let slot = $("#local-rules-slot");
+      if (!slot) {
+        slot = document.createElement("div");
+        slot.id = "local-rules-slot";
+        slot.className = "rules-body";
+        pane.insertBefore(slot, $("#btn-start-game"));
+      }
+      if (slot.contains($("#settings-grid"))) {
+        slot.hidden = !slot.hidden;
+      } else {
+        slot.appendChild($("#settings-grid"));
+        slot.hidden = false;
+      }
+      $("#btn-local-rules").textContent = slot.hidden
+        ? "House rules & match settings"
+        : "Hide house rules";
+      renderSettings();
+    });
+
     $("#btn-stage-leave").addEventListener("click", () => cb.leaveRoom());
     $("#btn-lobby-ready").addEventListener("click", () => {
       const me = state.room && state.room.players.find((p) => p.id === state.myId);
@@ -374,9 +519,25 @@
     $("#btn-lobby-start").addEventListener("click", () => cb.startMatch());
   }
 
+  /** Land on the join pane with a code pre-filled (invite links). */
+  function openJoin(code) {
+    $("#screen-menu").hidden = false;
+    switchPane("pane-join");
+    if (code) $("#menu-code").value = String(code).toUpperCase();
+    error("#join-error", "");
+    const saved = ($("#menu-nick").value || "").trim();
+    if (saved) {
+      // a returning player already has a name: walk straight into the room
+      $("#join-nick").value = saved;
+      $("#btn-join-room").click();
+    } else {
+      $("#join-nick").focus();
+    }
+  }
+
   window.BT = Object.assign(window.BT || {}, {
     Lobby: {
-      init, onRoomState, closeMenu, openHome,
+      init, onRoomState, closeMenu, openHome, openJoin,
       get settings() { return state.settings; },
     },
   });

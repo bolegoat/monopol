@@ -10,7 +10,6 @@
 (function () {
   const JAIL_POS = 10;
   const START_POS = 0;
-  const MAX_ROUNDS = 60; // safety net: richest player wins after 60 rounds
 
   const fmt = (n) => `€${n}`;
 
@@ -19,16 +18,26 @@
   const SURPRISE_CARDS = window.BT.CARDS.SURPRISE;
   const EVENT_CARDS = window.BT.CARDS.EVENT;
 
-  /* Default match configuration (overridable from the lobby). */
+  /* Default match configuration (overridable from the lobby). Every number the
+   * economy leans on is here rather than baked into ECONOMY, so a table can
+   * agree its own house rules and the engine reads them from one place. */
   const DEFAULT_CONFIG = {
     startCash: ECONOMY.startCash,
+    goReward: ECONOMY.goReward,
+    jailFee: ECONOMY.jailFee,
+    maxRounds: 60,           // 0 = play until one tycoon is left standing
     rules: {
       doubleRent: true,      // full color set doubles undeveloped base rent
       kafanaJackpot: false,  // taxes & fines pile up in the kafana pot
       auctions: false,       // declined properties go to public bidding
       mortgages: true,       // deeds can be mortgaged to raise cash
+      evenBuild: true,       // houses must go up evenly across a country
+      rentInJail: true,      // a jailed owner still collects rent
+      buildAnytime: true,    // build / mortgage outside your own turn
     },
   };
+
+  const numOr = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
 
   const wait = (ms) => new Promise((res) => setTimeout(res, ms));
 
@@ -65,11 +74,7 @@
      * @param {object} opts { silent?:boolean, config?:{startCash,rules} }
      */
     constructor(playerDefs, hooks, opts = {}) {
-      const cfg = opts.config || {};
-      this.config = {
-        startCash: Number(cfg.startCash) > 0 ? Number(cfg.startCash) : DEFAULT_CONFIG.startCash,
-        rules: Object.assign({}, DEFAULT_CONFIG.rules, cfg.rules || {}),
-      };
+      this.config = Game.normalizeConfig(opts.config);
       this.rules = this.config.rules;
       this.kafanaPot = 0;
       this.hooks = hooks;
@@ -107,9 +112,23 @@
       if (!opts.silent) this._log("🎲", "#ece9f5", `Game started — ${this.current.name} rolls first.`);
     }
 
+    /** Clamp any lobby/relay settings payload into a complete config. */
+    static normalizeConfig(cfg) {
+      const c = cfg || {};
+      return {
+        startCash: Number(c.startCash) > 0 ? Number(c.startCash) : DEFAULT_CONFIG.startCash,
+        goReward: Math.max(0, numOr(c.goReward, DEFAULT_CONFIG.goReward)),
+        jailFee: Math.max(0, numOr(c.jailFee, DEFAULT_CONFIG.jailFee)),
+        maxRounds: Math.max(0, numOr(c.maxRounds, DEFAULT_CONFIG.maxRounds)),
+        rules: Object.assign({}, DEFAULT_CONFIG.rules, c.rules || {}),
+      };
+    }
+
     /* ---------- accessors ---------- */
 
     get current() { return this.players[this.turnIdx]; }
+    get goReward() { return this.config.goReward; }
+    get jailFee() { return this.config.jailFee; }
     player(id) { return this.players.find((p) => p.id === id); }
     alive() { return this.players.filter((p) => !p.bankrupt); }
 
@@ -212,6 +231,10 @@
       const ps = this.props[tile.id];
       if (!ps || !ps.owner) return 0;
       if (ps.mortgaged) return 0; // a mortgaged plot collects nothing
+      const holder = this.player(ps.owner);
+      if (!holder || holder.bankrupt) return 0;
+      // house rule: a landlord doing time can be barred from collecting
+      if (holder.inJail && !this.rules.rentInJail) return 0;
       if (tile.kind === "airport") {
         const count = TILES.filter(
           (t) => t.kind === "airport" && this.props[t.id].owner === ps.owner,
@@ -247,6 +270,7 @@
       const ps = this.props[tile.id];
       if (ps.houses >= ECONOMY.maxHouses) return false;
       if (player.cash < tile.houseCost) return false;
+      if (!this.rules.evenBuild) return true;
       const levels = COUNTRY_GROUPS[tile.country].map((id) => this.props[id].houses);
       return ps.houses === Math.min(...levels); // even-build rule
     }
@@ -254,7 +278,8 @@
     canSellOn(player, tile) {
       if (tile.kind !== "city") return false;
       const ps = this.props[tile.id];
-      if (ps.owner !== player.id || ps.houses <= 0) return false;
+      if (!ps || ps.owner !== player.id || ps.houses <= 0) return false;
+      if (!this.rules.evenBuild) return true;
       const levels = COUNTRY_GROUPS[tile.country].map((id) => this.props[id].houses);
       return ps.houses === Math.max(...levels); // sell from the most built first
     }
@@ -300,8 +325,28 @@
 
     _bankrupt(p, creditor) {
       p.bankrupt = true;
+      p.debtAmount = 0;
+      p.debtTo = null;
       this._log("💀", "#ef4444", `${p.name} is bankrupt!`);
       if (this.hooks.bankrupted) this.hooks.bankrupted(p, creditor || null);
+
+      /* Everything they still hold goes to whoever bankrupted them — cash
+       * included. Handing over the deeds but quietly deleting the cash left in
+       * hand loses money that should have changed hands, which is exactly the
+       * kind of silent shortfall that reads as "he didn't pay me". */
+      const purse = Math.max(0, Math.round(p.cash));
+      p.cash = 0;
+      if (purse > 0) {
+        if (creditor && !creditor.bankrupt) {
+          creditor.cash += purse;
+          this._log("💵", "#f59e0b",
+            `${creditor.name} took ${fmt(purse)} from ${p.name}'s estate`);
+        } else {
+          this._creditPayment(purse, null);
+        }
+      }
+
+      const taken = [];
       for (const t of TILES) {
         const ps = this.props[t.id];
         if (ps && ps.owner === p.id) {
@@ -309,7 +354,13 @@
           ps.houses = 0;
           // debts follow the deed to the creditor; the bank clears them
           if (!creditor) ps.mortgaged = false;
+          taken.push(t.name);
         }
+      }
+      if (taken.length) {
+        this._log("🏦", "#f59e0b", creditor
+          ? `${creditor.name} inherited ${taken.length} ${taken.length === 1 ? "deed" : "deeds"} from ${p.name}`
+          : `${taken.length} ${taken.length === 1 ? "deed" : "deeds"} returned to the bank`);
       }
       this.hooks.teleportPawn(p, p.position); // refresh pawn (bankrupt styling)
       this.hooks.removePawn && this.hooks.removePawn(p);
@@ -319,7 +370,8 @@
     /** Route a payment to its recipient, or to the bank / kafana pot. */
     _creditPayment(paid, to) {
       if (paid <= 0) return;
-      if (to) { to.cash += paid; return; }
+      if (to && !to.bankrupt) { to.cash += paid; return; }
+      if (to) return; // creditor already out: the money dies with the estate
       if (this.rules.kafanaJackpot && this.phase !== "over") {
         // Say so out loud. Money leaving a player for the pot and reappearing
         // in someone else's balance turns later reads like cash materialising
@@ -335,37 +387,60 @@
      * Take `amount` off `from`.
      *
      * When they cannot cover it the shortfall becomes a DEBT they clear
-     * themselves — the engine no longer quietly sells their houses, mortgages
-     * their deeds and declares them bankrupt on their behalf. Play stops in the
-     * `settling` phase until they either pay or concede.
+     * themselves. The engine never sells their houses, mortgages their deeds or
+     * declares them bankrupt on their behalf — play stops in the `settling`
+     * phase until they either pay or concede. That is the whole point: a bad
+     * turn is a decision, not an automatic sell-off.
      *
-     * The automatic path survives as a fallback for when nothing is listening
-     * for `debtRaised`: without a prompt on the other end a match would sit
-     * forever waiting for an answer that never comes.
+     * The automatic path survives only for headless use (no `debtRaised` hook),
+     * because without a prompt on the other end a match would sit forever
+     * waiting for an answer that never comes.
      */
     _pay(from, amount, to) {
+      amount = Math.max(0, Math.round(amount));
       if (amount <= 0 || from.bankrupt) return;
 
-      if (from.cash < amount && this.hooks.debtRaised) {
-        const paid = from.cash;
-        from.cash = 0;
-        this._creditPayment(paid, to);
-        const owed = amount - paid;
-        from.debtAmount = owed;
-        from.debtTo = to ? to.id : null;
-        this.phase = "settling";
-        this._log("⚠️", "#ef4444",
-          `${from.name} is ${fmt(owed)} short${to ? " paying " + to.name : ""} and must raise it`);
+      if (from.cash >= amount) {
+        from.cash -= amount;
+        this._creditPayment(amount, to);
+        // stream the movement immediately: a balance that only updates when the
+        // turn ends looks exactly like a payment that never happened
         this._changed();
-        this.hooks.debtRaised(from, owed, to || null);
         return;
       }
 
-      if (from.cash < amount) this._liquidate(from, amount);
-      const paid = Math.min(from.cash, amount);
-      from.cash -= paid;
+      if (!this.hooks.debtRaised) {
+        // headless fallback only
+        this._liquidate(from, amount);
+        const paid = Math.min(from.cash, amount);
+        from.cash -= paid;
+        this._creditPayment(paid, to);
+        if (paid < amount) this._bankrupt(from, to || null);
+        this._changed();
+        return;
+      }
+
+      const paid = from.cash;
+      from.cash = 0;
       this._creditPayment(paid, to);
-      if (paid < amount) this._bankrupt(from, to || null);
+      const owed = amount - paid;
+      /* A second shortfall in the same turn (a card that fines you while you
+       * already owe rent) has to stack rather than replace, or the first debt
+       * silently evaporates. Different creditors are folded into the bank,
+       * which is the only party that can always be paid. */
+      if (from.debtAmount > 0) {
+        const sameCreditor = (from.debtTo || null) === (to ? to.id : null);
+        from.debtAmount += owed;
+        if (!sameCreditor) from.debtTo = null;
+      } else {
+        from.debtAmount = owed;
+        from.debtTo = to ? to.id : null;
+      }
+      this.phase = "settling";
+      this._log("⚠️", "#ef4444",
+        `${from.name} is ${fmt(owed)} short${to ? " paying " + to.name : ""} and must raise it`);
+      this._changed();
+      this.hooks.debtRaised(from, from.debtAmount, to || null);
     }
 
     /* ---------- settling a debt by hand ---------- */
@@ -409,9 +484,26 @@
       return true;
     }
 
-    /** The player's own call, never the engine's. */
+    /**
+     * Last resort for an online match: the debtor has stopped responding, so
+     * fall back to the old automatic behaviour rather than leaving everyone
+     * else stuck behind them. Never reached in normal play — the host arms this
+     * on a timer and cancels it the moment the debt is settled by hand.
+     */
+    forceSettle(p) {
+      if (!p || !p.debtAmount) return false;
+      const owed = p.debtAmount;
+      this._liquidate(p, owed);
+      if (p.cash >= owed) return this.settleDebt(p);
+      const to = p.debtTo ? this.player(p.debtTo) : null;
+      if (p.cash > 0) { this._creditPayment(p.cash, to); p.cash = 0; }
+      return this.declareBankrupt(p);
+    }
+
+    /** The player's own call, never the engine's. Only while actually in debt,
+     * so a misclick can never knock somebody out of a healthy game. */
     declareBankrupt(p) {
-      if (!p || p.bankrupt) return false;
+      if (!p || p.bankrupt || !(p.debtAmount > 0)) return false;
       const to = p.debtTo ? this.player(p.debtTo) : null;
       p.debtAmount = 0;
       p.debtTo = null;
@@ -427,13 +519,18 @@
       const from = p.position;
       const finalPos = await this.hooks.movePawn(p, from, steps, {
         onPassGo: () => {
-          if (!collectGo) return;
-          p.cash += ECONOMY.goReward;
-          this._log("🏁", "#22c55e", `${p.name} passed START and collected ${fmt(ECONOMY.goReward)}`);
+          if (!collectGo || !this.goReward) return;
+          p.cash += this.goReward;
+          this._log("🏁", "#22c55e", `${p.name} passed START and collected ${fmt(this.goReward)}`);
           this._changed();
         },
       });
       p.position = finalPos;
+      /* Publish the landing tile. Without this the only snapshot covering a move
+       * was whatever went out mid-hop (from passing START), which still described
+       * the tile the pawn had left — so a guest's roster and its pawn disagreed
+       * until something unrelated happened to broadcast again. */
+      this._changed();
     }
 
     async _sendToJail(p) {
@@ -488,9 +585,17 @@
             this._log("🏠", "#22c55e", `${p.name} is home at ${tile.name}`);
           } else {
             const owner = this.player(ps.owner);
-            if (!owner.bankrupt) {
-              const rent = this.rentFor(tile);
-              this._log("💰", "#ef4444", `${p.name} paid ${owner.name} ${fmt(rent)} rent for ${tile.name}`);
+            const rent = this.rentFor(tile);
+            if (owner.bankrupt) {
+              this._log("ban", "#8b98a8", `${tile.name} has no landlord — ${p.name} stays for free`);
+            } else if (rent <= 0) {
+              // say WHY it was free, or a mortgaged plot reads as a missed payment
+              this._log("banknote", "#f59e0b", ps.mortgaged
+                ? `${tile.name} is mortgaged — ${owner.name} collects nothing from ${p.name}`
+                : `${owner.name} is in prison and collects no rent on ${tile.name}`);
+            } else {
+              this._log("💰", "#ef4444",
+                `${p.name} owes ${owner.name} ${fmt(rent)} rent for ${tile.name}`);
               if (this.hooks.paidRent) this.hooks.paidRent(p, owner, rent, tile);
               this._pay(p, rent, owner);
             }
@@ -498,7 +603,7 @@
           break;
         }
         case "tax":
-          this._log(tile.icon, "#ef4444", `${p.name} paid ${fmt(tile.amount)} at the ${tile.name}`);
+          this._log("shield", "#ef4444", `${p.name} owes ${fmt(tile.amount)} at the ${tile.name}`);
           if (this.hooks.paidTax) this.hooks.paidTax(p, tile.amount, tile);
           this._pay(p, tile.amount, null);
           break;
@@ -516,6 +621,9 @@
               this.kafanaPot = 0;
               p.cash += pot;
               this._log("coffee", "#f4b73f", `${p.name} landed in the kafana and pockets the ${fmt(pot)} pot`);
+              this._changed();
+            } else if (this.rules.kafanaJackpot) {
+              this._log("coffee", "#f4b73f", `${p.name} is chilling in the kafana — the pot is empty`);
             } else {
               this._log("coffee", "#f4b73f", `${p.name} is chilling in the kafana`);
             }
@@ -617,14 +725,19 @@
     }
 
     _buy(p, tile) {
+      if (p.cash < tile.price) return false; // never let a purchase go on credit
       p.cash -= tile.price;
       this.props[tile.id].owner = p.id;
       this.props[tile.id].houses = 0;
-      this._log("🏙️", "#3b82f6", `${p.name} bought ${tile.name} for ${fmt(tile.price)}`);
+      this.props[tile.id].mortgaged = false;
+      this._log("🏙️", "#3b82f6",
+        `${p.name} bought ${tile.name} for ${fmt(tile.price)} — ${fmt(p.cash)} left`);
       if (this.hooks.boughtProperty) this.hooks.boughtProperty(p, tile);
       if (tile.kind === "city" && this.ownsGroup(p, tile.country)) {
         this._log("👑", "#f4b73f", `${p.name} now owns all of ${COUNTRIES[tile.country].name}!`);
       }
+      this._changed(); // the price leaving their balance is news, not bookkeeping
+      return true;
     }
 
     /* ---------- building ---------- */
@@ -714,8 +827,8 @@
         } else {
           p.jailTurns += 1;
           if (p.jailTurns >= 3) {
-            this._log("💵", "#ef4444", `Third failed attempt — ${p.name} pays ${fmt(ECONOMY.jailFee)} bail`);
-            this._pay(p, ECONOMY.jailFee, null);
+            this._log("💵", "#ef4444", `Third failed attempt — ${p.name} pays ${fmt(this.jailFee)} bail`);
+            this._pay(p, this.jailFee, null);
             if (!p.bankrupt) {
               p.inJail = false;
               this.hooks.setJailed && this.hooks.setJailed(p, false);
@@ -760,7 +873,7 @@
         break;
       }
 
-      if (this.round > MAX_ROUNDS) {
+      if (this.config.maxRounds > 0 && this.round > this.config.maxRounds) {
         const winner = this.alive().sort((a, b) => this.netWorth(b) - this.netWorth(a))[0];
         this._endGame(winner, "highest net worth when the season ended");
         return;
@@ -775,10 +888,10 @@
         const choice = await this.hooks.jailChoice(p);
         if (p.bankrupt) { this._finishTurn(); return; }
         if (choice === "pay") {
-          this._pay(p, ECONOMY.jailFee, null);
+          this._pay(p, this.jailFee, null);
           if (p.bankrupt) { this._finishTurn(); return; }
           p.inJail = false;
-          this._log("💵", "#f59e0b", `${p.name} paid ${fmt(ECONOMY.jailFee)} bail`);
+          this._log("💵", "#f59e0b", `${p.name} paid ${fmt(this.jailFee)} bail`);
         } else if (choice === "card") {
           p.getOutCards -= 1;
           p.inJail = false;
@@ -862,13 +975,10 @@
       this.surpriseDeck = [...(s.surpriseDeck || [])];
       this.eventDeck = [...(s.eventDeck || [])];
       this.kafanaPot = s.kafanaPot || 0;
-      if (s.config) {
-        this.config = {
-          startCash: Number(s.config.startCash) > 0 ? Number(s.config.startCash) : DEFAULT_CONFIG.startCash,
-          rules: Object.assign({}, DEFAULT_CONFIG.rules, s.config.rules || {}),
-        };
-        this.rules = this.config.rules;
-      }
+      // always normalise: a snapshot rebuilt by fromSnapshot() has no config of
+      // its own yet, and half-initialised rules crash every rule lookup
+      this.config = Game.normalizeConfig(s.config || this.config);
+      this.rules = this.config.rules;
     }
 
     /** Rebuild an engine from a snapshot (used on host migration / late hydrate). */
@@ -887,5 +997,7 @@
     }
   }
 
-  window.BT = Object.assign(window.BT || {}, { Game, SURPRISE_CARDS, EVENT_CARDS });
+  window.BT = Object.assign(window.BT || {}, {
+    Game, SURPRISE_CARDS, EVENT_CARDS, DEFAULT_CONFIG,
+  });
 })();

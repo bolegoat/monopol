@@ -168,6 +168,10 @@
     sendAction(action) { this.socket?.emit("player:action", action); }
     sendTradeOffer(trade) { this.socket?.emit("trade:offer", trade); }
     sendTradeResponse(payload) { this.socket?.emit("trade:respond", payload); }
+    /** Sender-only: pull an offer back off the table. */
+    withdrawTrade(id) { this.socket?.emit("trade:withdraw", { id }); }
+    /** Change your display name (lobby or mid-match). */
+    setName(name) { this.socket?.emit("lobby:name", name); }
     sendChat(text) { this.socket?.emit("chat:send", text); }
     /** Host-only: push a match-history entry (replayed to rejoining players). */
     sendRoomLog(entry) { this.socket?.emit("room:log", entry); }
@@ -181,6 +185,7 @@
     "player:action",
     "trade:offer",
     "trade:respond",
+    "trade:closed",
     "host:migrated",
     "room:event",
     "room:history",

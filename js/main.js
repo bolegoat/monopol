@@ -17,6 +17,7 @@
 
   UI.renderBoard();
   UI.hydrateIcons();
+  UI.syncDock(); // the left column starts collapsed until there is something in it
 
   const dice = new DiceManager($("#dice-canvas"));
   const pawnLayer = new PawnLayer($("#board"), UI.tileEls);
@@ -88,9 +89,7 @@
         window.BT.sfx.win();
         UI.showGameOver(winner, reason);
       },
-    }, {
-      config: { startCash: window.BT.Lobby.settings.startCash, rules: window.BT.Lobby.settings.rules },
-    });
+    }, { config: window.BT.Lobby.settings });
 
     UI.game = game;
     window.BT.game = game;
@@ -99,8 +98,11 @@
     UI.mortgageHandler = (tileId) => game.mortgage(game.current, tileId);
     UI.unmortgageHandler = (tileId) => game.unmortgage(game.current, tileId);
     UI.sellFieldHandler = (tileId) => game.sellField(game.current, tileId);
-    UI.settleHandler = () => game.settleDebt(UI._debtPlayer || game.current);
-    UI.bankruptHandler = () => game.declareBankrupt(UI._debtPlayer || game.current);
+    // resolve the debtor by id, never by a captured object: the settle prompt
+    // outlives any single repaint and the roster can be rebuilt underneath it
+    const debtor = () => game.player(UI._debtPlayerId) || game.current;
+    UI.settleHandler = () => game.settleDebt(debtor());
+    UI.bankruptHandler = () => game.declareBankrupt(debtor());
     defs.forEach((_, i) => pawnLayer.addPlayer(game.players[i], i));
     UI.sync(game);
     UI.log("dice", "#f4b73f", "Match started — good luck!");
@@ -123,6 +125,8 @@
       UI.setRoomChip(res.code || code || "");
       UI.buildHandler = (tileId) => mp.clickBuild(tileId);
       UI.sellHandler = (tileId) => mp.clickSell(tileId);
+      UI.settleHandler = () => mp.clickSettleDebt();
+      UI.bankruptHandler = () => mp.clickDeclareBankrupt();
       UI.mortgageHandler = (tileId) => mp.clickMortgage(tileId);
       UI.unmortgageHandler = (tileId) => mp.clickUnmortgage(tileId);
       UI.sellFieldHandler = (tileId) => mp.clickSellField(tileId);
@@ -144,6 +148,8 @@
       UI.setRoomChip(net.code || "");
       UI.buildHandler = (tileId) => mp.clickBuild(tileId);
       UI.sellHandler = (tileId) => mp.clickSell(tileId);
+      UI.settleHandler = () => mp.clickSettleDebt();
+      UI.bankruptHandler = () => mp.clickDeclareBankrupt();
       UI.mortgageHandler = (tileId) => mp.clickMortgage(tileId);
       UI.unmortgageHandler = (tileId) => mp.clickUnmortgage(tileId);
       UI.sellFieldHandler = (tileId) => mp.clickSellField(tileId);
@@ -185,6 +191,7 @@
     setReady(ready) { mp && mp.net.setReady(ready); },
     setColor(hex) { mp && mp.net.setColor(hex); },
     setAvatar(i) { mp && mp.net.setAvatar(i); },
+    setName(name) { mp && mp.net.setName(name); },
     sendSettings(s) { mp && mp.net.sendSettings(s); },
     startMatch() { mp && mp.net.startGame(); },
 
@@ -218,11 +225,12 @@
 
   $("#btn-roll").addEventListener("click", () => (mp ? mp.clickRoll() : game && game.roll()));
   $("#btn-end-turn").addEventListener("click", () => (mp ? mp.clickEndTurn() : game && game.endTurn()));
-  $("#btn-build").addEventListener("click", () => {
+  $("#btn-assets").addEventListener("click", () => {
     const g = activeGame();
     if (g) UI.openBuild(g);
   });
   $("#btn-trade").addEventListener("click", () => openTrade());
+  $("#btn-rules").addEventListener("click", () => UI.showRules(activeGame()));
 
   /* ---------- input polish ---------- */
 
@@ -249,7 +257,7 @@
 
   /* Keyboard: R roll, E end turn, B build, T trade. Modals handle their own
    * Enter/Escape (see ui.js), and anything typed in a field is left alone. */
-  const KEYS = { r: "#btn-roll", e: "#btn-end-turn", b: "#btn-build", t: "#btn-trade" };
+  const KEYS = { r: "#btn-roll", e: "#btn-end-turn", b: "#btn-assets", t: "#btn-trade" };
 
   document.addEventListener("keydown", (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
@@ -268,6 +276,31 @@
     btn.click();
   });
 
+  /* ---------- invite links ----------
+   * A room code you have to read out loud and have someone type in is one step
+   * too many. ?room=CODE drops a guest straight onto the join pane with the code
+   * filled in, and joins as soon as they have a nickname.
+   */
+  function inviteCode() {
+    try {
+      const raw = new URLSearchParams(location.search).get("room");
+      const code = String(raw || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+      return code.length === 5 ? code : null;
+    } catch (e) { return null; }
+  }
+
+  /** Strip ?room= once it has been used, so a reload does not re-trigger it. */
+  function clearInviteParam() {
+    try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ }
+  }
+
   /* ---------- saved-session resume (page reload mid-lobby/match) ---------- */
-  if (new NetClient().hasSession()) resumeSession();
+  const invited = inviteCode();
+  if (new NetClient().hasSession()) {
+    resumeSession();
+    if (invited) clearInviteParam();
+  } else if (invited) {
+    window.BT.Lobby.openJoin(invited);
+    clearInviteParam();
+  }
 })();

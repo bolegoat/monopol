@@ -72,8 +72,11 @@
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !els.modal.hidden) close();
-    // M toggles mute from anywhere except while typing in a field
-    if ((e.key === "m" || e.key === "M") && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) {
+    // M toggles mute from anywhere except while typing in a field. activeElement
+    // can legitimately be null (right after a focused node is removed), and
+    // reading .tagName off it used to throw and swallow the whole handler.
+    const tag = document.activeElement ? document.activeElement.tagName : "";
+    if ((e.key === "m" || e.key === "M") && !/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) {
       Audio.toggleMute();
     }
   });
