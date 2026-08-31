@@ -44,11 +44,14 @@
       log: UI.log,
       stateChanged: () => UI.sync(game),
 
+      /* Draw the numbers fairly, then animate them. Letting the physics decide
+       * meant the spawn band, the velocity ranges and the cocked-die snap were
+       * all quietly weighting the outcome — see randomDice() in dice3d.js. */
       rollDice: (cb) =>
         dice.roll((d1, d2, total) => {
           UI.showLastRoll(d1, d2);
           cb(d1, d2, total);
-        }),
+        }, window.BT.randomDice()),
 
       movePawn: async (player, from, steps, hooks) => {
         const pos = await pawnLayer.hopTo(player.id, from, steps, hooks);
@@ -250,6 +253,20 @@
     if (!hit || hit.disabled || hit.getAttribute("aria-disabled") === "true") return;
     window.BT.sfx.click();
   }, { passive: true });
+
+  /* Hover a player in the ledger to light up everything they own. */
+  const roster = $("#player-list");
+  roster.addEventListener("pointerover", (e) => {
+    const row = e.target.closest(".pl");
+    UI.spotlightPlayer(row ? row.dataset.playerId : null);
+  });
+  roster.addEventListener("pointerleave", () => UI.spotlightPlayer(null));
+  // keyboard parity: tabbing through the roster lights the same thing
+  roster.addEventListener("focusin", (e) => {
+    const row = e.target.closest(".pl");
+    if (row) UI.spotlightPlayer(row.dataset.playerId);
+  });
+  roster.addEventListener("focusout", () => UI.spotlightPlayer(null));
 
   /* Click a player in the ledger to open a trade aimed at them. */
   $("#player-list").addEventListener("click", (e) => {

@@ -78,6 +78,9 @@
     addPlayer(player, seat) {
       const el = document.createElement("div");
       el.className = "pawn";
+      // so the roster can spotlight one player's pawn along with their plots
+      el.dataset.playerId = player.id;
+      el.style.setProperty("--pw", player.color);
       el.style.background = player.color;
       const style = Number.isFinite(player.tokenStyle)
         ? player.tokenStyle

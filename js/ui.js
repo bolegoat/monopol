@@ -487,6 +487,9 @@
       if (val) val.textContent = money(pot);
     }
 
+    // a deed changing hands while the spotlight is up must move the glow with it
+    if (UI._spotlightId) UI._applySpotlight(game);
+
     // keep the 3D houses/hotels overlay in step with engine state
     if (window.BT.Buildings) window.BT.Buildings.sync(game);
   };
@@ -768,6 +771,40 @@
       row.el.classList.toggle("has-clock", active);
       if (active) row.clock.style.transform = "scaleX(" + Math.max(0, Math.min(1, frac)).toFixed(3) + ")";
     }
+  };
+
+  /* ---------------------------------------------------------------------------
+   * Player spotlight
+   *
+   * "Who owns what" is the question you ask most often and the board answers it
+   * worst: a seat-coloured chip and a rail per tile is enough to identify one
+   * plot you are already looking at, but not to see an empire at a glance —
+   * especially with five other colours competing for attention.
+   *
+   * Hovering a player in the roster drops the rest of the board back and lights
+   * their plots, their pawn and their row. One gesture, and their whole position
+   * is the only thing on screen.
+   * ------------------------------------------------------------------------ */
+
+  UI._spotlightId = null;
+
+  UI.spotlightPlayer = function (playerId) {
+    const app = $("#app");
+    UI._spotlightId = playerId || null;
+    if (app) app.classList.toggle("is-spotlight", Boolean(UI._spotlightId));
+    UI._applySpotlight((window.BT.mp && window.BT.mp.game) || UI.game || window.BT.game);
+  };
+
+  UI._applySpotlight = function (game) {
+    const id = UI._spotlightId;
+    for (const [tileId, parts] of UI.tileParts) {
+      const ps = game && game.props[tileId];
+      parts.el.classList.toggle("is-lit", Boolean(id && ps && ps.owner === id));
+    }
+    for (const [rowId, row] of UI._rows) row.el.classList.toggle("is-lit", rowId === id);
+    document.querySelectorAll(".pawn").forEach((el) => {
+      el.classList.toggle("is-lit", Boolean(id) && el.dataset.playerId === id);
+    });
   };
 
   /** Flash a row when that seat drops or comes back. */

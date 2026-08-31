@@ -54,6 +54,45 @@
   const LINEAR_DAMPING = 0.28;
   const ANGULAR_DAMPING = 0.34;
 
+  /* ---------- unbiased randomness ----------
+   *
+   * Where a die ends up in the simulation is not a fair draw. The throw starts
+   * from a narrow band of spawn positions with velocities inside fixed ranges,
+   * and the same solver runs every time — so some faces come up more often than
+   * others, and the sequence has the lumpy, repetitive feel of a physics engine
+   * rather than of dice. Worse, a die that lands cocked gets nudged or snapped
+   * flat, and which face that lands on is decided by whichever way it happened
+   * to be leaning.
+   *
+   * So the numbers are drawn first, properly, and the tumble is animation. Values
+   * come from the CSPRNG with rejection sampling: 256 is not a multiple of 6, so
+   * naively taking `byte % 6` would make 1-4 about 1.6% likelier than 5-6.
+   * Discarding the tail above the last whole multiple removes that skew entirely.
+   */
+  const randomInt = (() => {
+    const c = typeof crypto !== "undefined" && crypto.getRandomValues
+      ? crypto : null;
+    const buf = c ? new Uint8Array(16) : null;
+    let idx = buf ? buf.length : 0;
+    const nextByte = () => {
+      if (idx >= buf.length) { c.getRandomValues(buf); idx = 0; }
+      return buf[idx++];
+    };
+    /** Uniform integer in [0, n) for n <= 256. */
+    return (n) => {
+      if (!c || n > 256) return Math.floor(Math.random() * n);
+      const limit = 256 - (256 % n); // largest whole multiple of n
+      for (let guard = 0; guard < 64; guard++) {
+        const b = nextByte();
+        if (b < limit) return b % n;
+      }
+      return Math.floor(Math.random() * n); // pathological; never reached
+    };
+  })();
+
+  /** A fair pair of dice, independent of anything the simulation does. */
+  const randomDice = () => [1 + randomInt(6), 1 + randomInt(6)];
+
   /* Face values per local axis (BoxGeometry material order px,nx,py,ny,pz,nz).
    * Opposite faces always sum to 7. */
   const FACE_VALUES = { px: 1, nx: 6, py: 2, ny: 5, pz: 3, nz: 4 };
@@ -634,5 +673,5 @@
     }
   }
 
-  window.BT = Object.assign(window.BT || {}, { DiceManager });
+  window.BT = Object.assign(window.BT || {}, { DiceManager, randomInt, randomDice });
 })();

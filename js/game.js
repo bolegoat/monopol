@@ -41,10 +41,16 @@
 
   const wait = (ms) => new Promise((res) => setTimeout(res, ms));
 
+  /* Fisher-Yates off the same unbiased source as the dice, so a shuffled deck is
+   * as fair as a throw. `Math.floor(Math.random() * n)` is a fine shuffle in
+   * practice; sharing one generator just means there is a single place to reason
+   * about randomness in the game. */
+  const rnd = (n) => (window.BT.randomInt ? window.BT.randomInt(n) : Math.floor(Math.random() * n));
+
   const shuffle = (arr) => {
     const a = [...arr];
     for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = rnd(i + 1);
       [a[i], a[j]] = [a[j], a[i]];
     }
     return a;
@@ -789,6 +795,8 @@
             this._log("🚔", "#ef4444", `Three doubles in a row — the police were watching`);
             await this._sendToJail(p);
             this._finishTurn();
+            await this._maybeAutoEnd(p, TILES[JAIL_POS]);
+            this._changed();
             return;
           }
         } else {
@@ -796,6 +804,9 @@
         }
 
         await this._movePawn(p, total, true);
+        // remember where the dice actually put them: going to prison teleports
+        // the pawn, so p.position after resolution is not the tile they landed on
+        const landed = TILES[p.position];
         await this._resolveLanding(p);
 
         if (!p.bankrupt && !p.inJail && doubles) {
@@ -803,9 +814,32 @@
           this._log("🔁", "#f4b73f", `${p.name} rolls again (doubles)`);
         } else {
           this._finishTurn();
+          await this._maybeAutoEnd(p, landed);
         }
         this._changed();
       });
+    }
+
+    /**
+     * End the turn without being asked, when the square offers nothing to decide.
+     *
+     * The four corners are pure outcome: prison, the kafana, START, the visiting
+     * yard. Nothing is bought, nothing is owed, nobody chooses anything — so the
+     * End Turn click afterwards is pure ceremony, and it is most annoying exactly
+     * when you have just been sent to prison and want the turn over with.
+     *
+     * Held back in two cases. Doubles are handled by the caller (you owe another
+     * roll). And when the table has turned OFF "build any time", your own turn is
+     * the only window you have to put houses up, so it is not ours to close.
+     */
+    async _maybeAutoEnd(p, tile) {
+      if (this.phase !== "turn-end") return;   // a debt, or the match ended
+      if (!tile || tile.kind !== "corner") return;
+      if (!this.rules.buildAnytime) return;    // their only chance to build
+      if (p.bankrupt) return;
+      await wait(900);                          // a beat to read what happened
+      if (this.phase !== "turn-end" || this.current !== p) return; // state moved on
+      await this.endTurn();
     }
 
     _rollJail() {
@@ -817,12 +851,14 @@
         const doubles = d1 === d2;
         this._log("🎲", "#ece9f5", `${p.name} rolled ${d1} + ${d2} in prison`);
 
+        let landed = TILES[p.position]; // unchanged if they stay behind bars
         if (doubles) {
           p.inJail = false;
           p.jailTurns = 0;
           this._log("🔓", "#22c55e", `Doubles! ${p.name} walks free`);
           this.hooks.setJailed && this.hooks.setJailed(p, false);
           await this._movePawn(p, total, true);
+          landed = TILES[p.position];
           await this._resolveLanding(p);
         } else {
           p.jailTurns += 1;
@@ -833,6 +869,7 @@
               p.inJail = false;
               this.hooks.setJailed && this.hooks.setJailed(p, false);
               await this._movePawn(p, total, true);
+              landed = TILES[p.position];
               await this._resolveLanding(p);
             }
           } else {
@@ -840,6 +877,7 @@
           }
         }
         this._finishTurn();
+        await this._maybeAutoEnd(p, landed);
         this._changed();
       });
     }

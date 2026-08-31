@@ -476,8 +476,10 @@
           // Draw the result ONCE here, stream it to every client, then let
           // each screen play the identical guided animation on the same
           // fixed timeline — same faces, same duration, no drift, no delay.
-          const d1 = 1 + Math.floor(Math.random() * 6);
-          const d2 = 1 + Math.floor(Math.random() * 6);
+          // Uniform draw: `Math.random() * 6` was fine, but randomDice() is the
+          // one source of dice values in the game now, so local and online play
+          // cannot drift apart in fairness.
+          const [d1, d2] = window.BT.randomDice();
           UI.showLastRoll(d1, d2);
           self.net.sendEvent({ kind: "roll-result", d1, d2 });
           self.dice.roll((a, b, total) => cb(a, b, total), [d1, d2]);

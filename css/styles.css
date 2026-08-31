@@ -3334,3 +3334,82 @@ body {
   color: #5f6b7c;
   margin-left: 6px;
 }
+
+/* ============================================================
+   PLAYER SPOTLIGHT
+   Hover a name in the roster and the rest of the table steps back:
+   their plots light up in their own colour, their pawn stays bright,
+   everything else desaturates. Reading one player's whole position
+   used to mean hunting for a colour among five others.
+   ============================================================ */
+
+.app.is-spotlight .tile {
+  opacity: 0.34;
+  filter: saturate(0.3) brightness(0.72);
+  transition: opacity 160ms ease, filter 160ms ease;
+}
+
+/* The glow is the owner's own colour, which paintOwnership has already put on the
+   tile as --oc — no second source of truth for seat colours.
+   It has to be the tile's OWN box-shadow rather than a ::before: .tile sets
+   overflow:hidden, which would clip the outer bloom off a pseudo-element. */
+.app.is-spotlight .tile.is-lit {
+  opacity: 1;
+  filter: none;
+  z-index: 8;
+  box-shadow:
+    inset 0 0 0 2px var(--oc, var(--gold)),
+    0 0 18px -2px var(--oc-glow, rgba(240, 182, 74, 0.6));
+  animation: lit-pulse 1.9s ease-in-out infinite;
+}
+
+@keyframes lit-pulse {
+  50% {
+    box-shadow:
+      inset 0 0 0 2px var(--oc, var(--gold)),
+      0 0 30px 2px var(--oc-glow, rgba(240, 182, 74, 0.5));
+  }
+}
+
+/* a mortgaged plot is still theirs, but it should not look like an asset */
+.app.is-spotlight .tile.is-lit.is-hocked {
+  opacity: 0.7;
+  animation: none;
+  box-shadow: inset 0 0 0 2px rgba(240, 182, 74, 0.45);
+}
+
+/* the 3D buildings and the dice sit on their own canvases, so they cannot be
+   dimmed per tile — pull them both back as a whole instead */
+.app.is-spotlight .buildings-canvas { opacity: 0.5; transition: opacity 160ms ease; }
+
+.app.is-spotlight .pawn {
+  opacity: 0.28;
+  filter: saturate(0.3);
+  transition: opacity 160ms ease, filter 160ms ease;
+}
+
+.app.is-spotlight .pawn.is-lit {
+  opacity: 1;
+  filter: none;
+  z-index: 10;
+  /* --pw is the seat colour, set on the pawn when it is created */
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.55),
+    0 0 0 3px var(--pw, #fff),
+    0 0 24px var(--pw, rgba(255, 255, 255, 0.4));
+}
+
+.app.is-spotlight .pl {
+  opacity: 0.42;
+  transition: opacity 160ms ease;
+}
+
+.app.is-spotlight .pl.is-lit {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* nothing to gain from animating this for someone who asked us not to */
+@media (prefers-reduced-motion: reduce) {
+  .app.is-spotlight .tile.is-lit::before { animation: none; }
+}
