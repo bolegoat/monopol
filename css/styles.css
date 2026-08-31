@@ -1,5 +1,5 @@
 /* ============================================================================
- * Balkan Tycoon � styles.css
+ * Balkan Tycoon Ã¯Â¿Â½ styles.css
  * Zero-overflow viewport lock, 11x11 CSS grid board with reference-style
  * flag-header cards, SVG icon system, players + log side panel.
  * ========================================================================== */
@@ -33,7 +33,7 @@
 }
 
 /* The UA's [hidden] rule loses to any author `display`, so every component
- * that sets display (.btn, .turn-timer, .trade-card�) would ignore the hidden
+ * that sets display (.btn, .turn-timer, .trade-cardÃ¯Â¿Â½) would ignore the hidden
  * attribute. Re-assert it once, globally, instead of per component. */
 [hidden] { display: none !important; }
 
@@ -181,7 +181,7 @@ body {
 .tile-top .tile__card { flex-direction: column-reverse; }
 .tile-top .tile__group { top: 0; bottom: auto; }
 /* the top row is inverted, so the owner plate flips edge and grow direction
-   (its lit side flips too � see .tile-top.is-owned in the ownership section) */
+   (its lit side flips too Ã¯Â¿Â½ see .tile-top.is-owned in the ownership section) */
 .tile-top .tile__owner { top: 4px; bottom: auto; transform-origin: top center; }
 
 /* hover: group-color glow + lift toward the board center */
@@ -200,7 +200,7 @@ body {
 /* ---------- ownership, layer 1: wash + ring ----------
  * The wash falls from the center-facing edge and the ring outlines the whole
  * plot, both in the owner's seat color. This is the layer you read without
- * looking directly at the tile � it answers "taken or free?" at a glance,
+ * looking directly at the tile Ã¯Â¿Â½ it answers "taken or free?" at a glance,
  * before you focus enough to read the plate or the rent. A completed country
  * pushes the ring to full opacity and adds an inner glow. */
 .tile__tint {
@@ -313,7 +313,7 @@ body {
 
 /* ---------- ownership, layer 3: live rent ----------
  * On an owned plot the price is history, so the pill switches to what landing
- * there costs now � houses, set bonus and airport ladder included. Kept on a
+ * there costs now Ã¯Â¿Â½ houses, set bonus and airport ladder included. Kept on a
  * dark ground with the number in the owner's color: a third solid color block
  * next to the plate and the ring would be noise, and the digits have to stay
  * readable at 12px. The "R" prefix is there so rent can never be misread as
@@ -326,11 +326,11 @@ body {
 }
 
 /* The footer is one row on a tile roughly 76px wide, so it can hold the owner
-   chip, the flag badge and the rent — but not all three. Once a plot is owned,
+   chip, the flag badge and the rent Ã¢â‚¬â€ but not all three. Once a plot is owned,
    the flag badge is the one to go: the country is already stated by the flag
    banner across the top of the card and by the group strip along the edge,
    whereas the rent is the number you actually need and was getting clipped to
-   "R €" on every owned city. */
+   "R Ã¢â€šÂ¬" on every owned city. */
 .tile.is-owned .tile__flagbadge { display: none; }
 
 /* small country flag badge sitting next to the price tag */
@@ -415,7 +415,7 @@ body {
    to open a manager to find out why landing on someone's city was free. */
 /* The hatch wash carries the message at board distance; the chip confirms it up
    close. It used to be the word MORTGAGED across the middle of the card, which
-   landed squarely on the city name and made half the tiles unreadable — and the
+   landed squarely on the city name and made half the tiles unreadable Ã¢â‚¬â€ and the
    name is how you know which plot you are looking at. The rent pill is already
    struck through and the owner chip already drains out, so the word was the
    third telling of a story that was clear after the first. */
@@ -593,7 +593,7 @@ body {
   min-width: 0;
 }
 
-/* the seat colour rail — the single loudest turn cue on screen */
+/* the seat colour rail Ã¢â‚¬â€ the single loudest turn cue on screen */
 .hud-turn__bar {
   position: absolute;
   left: 0;
@@ -661,7 +661,7 @@ body {
 }
 
 /* --- row 2: the dice tray. Confining the canvas here is what keeps the dice
-   off the buttons and the log — they used to tumble across the whole centre. */
+   off the buttons and the log Ã¢â‚¬â€ they used to tumble across the whole centre. */
 
 .hud-dice {
   position: relative;
@@ -726,7 +726,7 @@ body {
 /* --- row 3: the property offer ---------------------------------------------
    Landing on an unowned plot used to open a modal with Buy and Skip. That
    covered the board, which is the one thing you need in order to do anything
-   about being short of the price — so "Skip" was the only real option and the
+   about being short of the price Ã¢â‚¬â€ so "Skip" was the only real option and the
    prompt demanded an answer before you could sell or mortgage a thing.
    It is a bar in the middle of the table now. It stays put, the board stays
    live behind it, and it is still there when you come back with the money.
@@ -804,8 +804,6 @@ body {
   border-radius: 8px;
 }
 
-/* nothing to raise, or nothing short: the button would just be noise */
-.hud-offer:not(.is-short) #btn-offer-raise { display: none; }
 
 /* --- row 4: status + the action buttons, dead centre of the table --- */
 
@@ -865,7 +863,7 @@ body {
   min-height: 0;
   padding: 0 0.4cqw;
   font-size: clamp(8.5px, 1.16cqw, 13px);
-  /* four lines at line-height 1.55, and nothing more — the height is fixed so
+  /* four lines at line-height 1.55, and nothing more Ã¢â‚¬â€ the height is fixed so
      the dice tray above it keeps everything else */
   height: calc(4 * 1.55em);
 }
@@ -1091,10 +1089,9 @@ body {
    a seat-coloured rule down the left, name on the baseline,
    money right-aligned in tabular figures, and two hairline
    meters (net worth, turn clock) pinned to the bottom edge.
-   No cards, no glow, no shadows � just rules and rhythm.
+   No cards, no glow, no shadows Ã¯Â¿Â½ just rules and rhythm.
    ============================================================ */
 
-.ic-chip { width: 9px; height: 9px; color: var(--green); }
 .ic-tag { width: 10px; height: 10px; }
 
 .pl {
@@ -1381,7 +1378,7 @@ body {
    Action log: four lines of plain text
    Every entry used to be a rounded, tinted panel of its own, in a bordered box
    with a header, filling a third of the table. On a board this is a running
-   commentary — it should read like one line of subtitles, not a stack of cards.
+   commentary Ã¢â‚¬â€ it should read like one line of subtitles, not a stack of cards.
    No box, no rules, no chrome: just the icon and the sentence.
    -------------------------------------------------------------------------- */
 
@@ -1423,7 +1420,7 @@ body {
 }
 
 /* the older lines recede so the eye lands on the newest, but they all stay
-   readable — a line you cannot read is just clutter */
+   readable Ã¢â‚¬â€ a line you cannot read is just clutter */
 .log-entry:first-child { opacity: 0.58; }
 .log-entry:nth-child(2) { opacity: 0.74; }
 .log-entry:nth-child(3) { opacity: 0.89; }
@@ -1658,78 +1655,10 @@ body {
 .lobby-row__badge.ready { background: rgba(46, 204, 113, 0.13); color: var(--green); }
 .lobby-row__badge.waiting { background: rgba(135, 146, 163, 0.12); color: var(--muted); }
 .lobby-row.is-offline { opacity: 0.45; }
-/* ---------- build modal ---------- */
-
-.modal-build { width: min(470px, 92vw); text-align: left; }
-.modal-build .modal-title, .modal-build .modal-note { text-align: center; }
-
-.build-list {
-  margin-top: 14px;
-  max-height: 50vh;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.build-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  font-weight: 800;
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.build-group i { width: 10px; height: 10px; border-radius: 3px; }
-.build-group em { margin-left: auto; font-style: normal; font-weight: 600; text-transform: none; letter-spacing: 0; }
-
-.build-row {
-  display: grid;
-  grid-template-columns: 8px 1fr auto auto;
-  align-items: center;
-  gap: 10px;
-  background: var(--panel-2);
-  border-radius: var(--radius);
-  padding: 9px 12px;
-}
-
-.build-row__color { width: 8px; height: 100%; min-height: 26px; border-radius: 3px; }
-.build-row__name { font-weight: 700; font-size: 13.5px; }
-.build-row__houses {
-  font-size: 11px;
-  color: var(--muted);
-  margin-top: 2px;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-.build-row__houses .ic-chip { color: var(--green); }
-
-/* property manager: a row now carries up to four actions, so they group at the
-   end and the row stretches to fit rather than squeezing the name */
-.build-row__main { flex: 1 1 auto; min-width: 0; }
-.build-row__acts { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
-
-.build-row__flag {
-  font-style: normal;
-  font-weight: 800;
-  color: var(--gold);
-  letter-spacing: 0.02em;
-}
-
-/* a mortgaged deed is still yours but earns nothing � read it as dimmed */
-.build-row.is-mortgaged { opacity: 0.72; }
-.build-row.is-mortgaged .build-row__color { filter: grayscale(0.75); }
-
-.build-row__btn--sell:not(:disabled):hover { color: #ff9d9d; border-color: rgba(239, 68, 68, 0.5); }
-.ic-chip--house { color: var(--house); }
-.ic-chip--hotel { color: var(--hotel); width: 12px; height: 12px; }
-.build-row__houses .ic-chip--house { color: var(--house); }
-.build-row__houses .ic-chip--hotel { color: var(--hotel); }
+/* ---------- small square action button ----------
+   All that survives of the old property-manager modal. The manager is gone Ã¢â‚¬â€
+   deeds are handled on the board Ã¢â‚¬â€ but the settle-debt prompt still lists
+   everything you could raise cash against, and these are its buttons. */
 
 .build-row__btn {
   width: 32px;
@@ -1802,7 +1731,7 @@ body {
 
 /* Native dropdowns draw their popup with the UA's own palette. The closed
    control inherited our near-white text, but the popup kept a white
-   background � so every option was white on white and unreadable. color-scheme
+   background Ã¯Â¿Â½ so every option was white on white and unreadable. color-scheme
    asks the UA to render the whole widget dark; the explicit option colours
    cover engines that ignore it. */
 .select,
@@ -1955,34 +1884,32 @@ body {
 }
 
 /* ============================================================
-   Property deed hover tooltip (deed.js) � strictly emoji-free:
+   Property deed hover tooltip (deed.js) Ã¯Â¿Â½ strictly emoji-free:
    clean typography, SVG icons and CSS badges only.
    ============================================================ */
 
+/* The deed is a card in the side panel, not a tooltip chasing the cursor any
+ * more. It kept `position: fixed` and `pointer-events: none` from that life,
+ * and the pointer-events line is what made every button inside it dead: the
+ * mortgage and sell-to-bank controls rendered, enabled, with handlers attached,
+ * and swallowed nothing Ã¢â‚¬â€ clicks fell straight through to the panel behind. */
 .deed {
-  position: fixed;
-  z-index: 80;
-  min-width: 216px;
-  max-width: 280px;
+  position: relative;
+  width: 100%;
   background: rgba(10, 15, 24, 0.96);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 10px;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55), 0 2px 10px rgba(0, 0, 0, 0.4);
   overflow: hidden;
-  pointer-events: none;
+  pointer-events: auto;
   color: #e8ecf3;
 }
 
-/* entry animation per opening direction */
-.deed.deed--up    { --ix: 0; --iy: 8px; }
-.deed.deed--down  { --ix: 0; --iy: -8px; }
-.deed.deed--right { --ix: -8px; --iy: 0; }
-.deed.deed--left  { --ix: 8px; --iy: 0; }
-.deed.anim { animation: deed-in 150ms cubic-bezier(0.22, 1, 0.36, 1); }
+/* the directional slide-in classes went with the tooltip; the card fades now */
+.deed { animation: deed-in 140ms ease-out; }
 
 @keyframes deed-in {
-  from { opacity: 0; transform: translate(var(--ix), var(--iy)); }
-  to   { opacity: 1; transform: translate(0, 0); }
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* group color banner across the top of the card */
@@ -2152,7 +2079,7 @@ body {
 .deed__dev.is-hocked .deed__pieces { color: var(--gold); opacity: 0.85; }
 .deed__dev.is-hocked .deed__devrent { color: var(--muted); font-weight: 700; }
 
-/* who is standing on this tile — the card described the plot but never said
+/* who is standing on this tile Ã¢â‚¬â€ the card described the plot but never said
    which pawns were actually on it */
 .deed__here {
   display: flex;
@@ -2197,7 +2124,7 @@ body {
 .deed__token .ic-deed { width: 10px; height: 10px; }
 
 /* ============================================================
-   Player palette � seat colors as first-class design tokens.
+   Player palette Ã¯Â¿Â½ seat colors as first-class design tokens.
    The lobby assigns these from js/tokens.js PLAYER_COLORS; every
    roster row also gets --pc inline so components can tint
    themselves from the live roster instead of a fixed index.
@@ -2230,7 +2157,7 @@ body {
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease, transform 120ms ease;
 }
 
-/* reachable while the pre-game menu overlay (z 120) is up � unmuting is the
+/* reachable while the pre-game menu overlay (z 120) is up Ã¯Â¿Â½ unmuting is the
    first thing a player wants to do, before the match even starts */
 #btn-audio { position: relative; z-index: 130; }
 #modal-audio { z-index: 140; }
@@ -2247,7 +2174,6 @@ body {
 
 /* the property manager can be opened on top of the buy prompt while you raise
    cash, so it has to sit above it in the stack */
-#modal-build { z-index: 125; }
 
 /* conceding the game should not look like an ordinary button */
 .btn.btn-danger {
@@ -2337,13 +2263,13 @@ body {
 .stage-badge.offline { background: rgba(245, 158, 11, 0.16); color: #fbbf24; }
 
 /* ============================================================
-   LEFT DOCK � incoming trade cards + collapsible session log
+   LEFT DOCK Ã¯Â¿Â½ incoming trade cards + collapsible session log
    ============================================================ */
 
 /* A real column, not a floating overlay.
  *
  * It used to be position:fixed over the left edge of the screen, which put trade
- * cards and the session log straight on top of the left column of tiles — the
+ * cards and the session log straight on top of the left column of tiles Ã¢â‚¬â€ the
  * board is centred and there is nowhere near 280px of empty gutter beside it. As
  * a flex column it costs the board nothing on any normal screen (the board is
  * capped by viewport HEIGHT long before width becomes the binding constraint)
@@ -2804,7 +2730,7 @@ body {
 @keyframes reconnect-pulse { 50% { opacity: 0.5; } }
 
 /* ============================================================
-   The prison (corner tile) � a barred cell leaning toward the
+   The prison (corner tile) Ã¯Â¿Â½ a barred cell leaning toward the
    board centre plus a visiting yard on the outer edge.
 
    Two layers draw the same box:
@@ -2908,7 +2834,7 @@ body {
 /* Front set: the .jail-front grid item, above the pawn layer. */
 .jail-front {
   position: relative;
-  z-index: 8; /* pawn-layer is 7 � prisoners end up behind these bars */
+  z-index: 8; /* pawn-layer is 7 Ã¯Â¿Â½ prisoners end up behind these bars */
   pointer-events: none;
 }
 
@@ -2945,7 +2871,7 @@ body {
 .tile--at-br .jail__yard { align-items: flex-end; justify-content: flex-end; }
 .tile--at-bl .jail__yard { align-items: flex-end; justify-content: flex-start; }
 
-/* Printed on the board like the real thing � tokens stand on top of it. */
+/* Printed on the board like the real thing Ã¯Â¿Â½ tokens stand on top of it. */
 .jail__tag {
   display: inline-flex;
   align-items: center;
@@ -3090,7 +3016,7 @@ body {
 /* ============================================================
    TRADE: player picker (replaces the native <select>)
    A native dropdown draws its popup with the platform palette, which on
-   Windows meant near-white text on a white popup — unreadable. Chips carry
+   Windows meant near-white text on a white popup Ã¢â‚¬â€ unreadable. Chips carry
    the seat colour, the token and the balance, and cannot be restyled out
    from under us.
    ============================================================ */
@@ -3208,15 +3134,7 @@ body {
    PROPERTY INSPECTOR: the deed, docked in the side column
    ============================================================ */
 
-.inspect-slot .deed {
-  position: static;
-  width: 100%;
-  max-width: none;
-  opacity: 1;
-  visibility: visible;
-  box-shadow: none;
-  border-color: rgba(255, 255, 255, 0.08);
-}
+.inspect-slot .deed { border-color: rgba(255, 255, 255, 0.08); }
 
 .deed-acts {
   display: grid;
@@ -3284,7 +3202,7 @@ body {
    TRADE CARDS: spectator copies
    Every seat sees an offer go out. Only the two parties can act on it, so
    everyone else gets the same card with the buttons replaced by a status
-   line — no more silent deals nobody else knew about.
+   line Ã¢â‚¬â€ no more silent deals nobody else knew about.
    ============================================================ */
 
 .trade-card.is-spectator { opacity: 0.86; border-style: dashed; }
@@ -3350,7 +3268,7 @@ body {
 }
 
 /* The glow is the owner's own colour, which paintOwnership has already put on the
-   tile as --oc — no second source of truth for seat colours.
+   tile as --oc Ã¢â‚¬â€ no second source of truth for seat colours.
    It has to be the tile's OWN box-shadow rather than a ::before: .tile sets
    overflow:hidden, which would clip the outer bloom off a pseudo-element. */
 .app.is-spotlight .tile.is-lit {
@@ -3379,7 +3297,7 @@ body {
 }
 
 /* the 3D buildings and the dice sit on their own canvases, so they cannot be
-   dimmed per tile — pull them both back as a whole instead */
+   dimmed per tile Ã¢â‚¬â€ pull them both back as a whole instead */
 .app.is-spotlight .buildings-canvas { opacity: 0.5; transition: opacity 160ms ease; }
 
 .app.is-spotlight .pawn {

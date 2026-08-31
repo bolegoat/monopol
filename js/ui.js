@@ -1,4 +1,4 @@
-﻿/* ============================================================================
+/* ============================================================================
  * Balkan Tycoon — ui.js
  * Reference-style tile cards (flag header, price bottom-left), players panel
  * with ownership lists, bottom action log (newest last, scrollable), SVG
@@ -975,12 +975,9 @@
       phase === "over" || !me || me.bankrupt ||
       game.players.filter((p) => !p.bankrupt).length < 2;
 
-    // Deeds: build, mortgage, buy back, sell off. Enabled whenever this client
-    // holds anything it is allowed to touch right now.
-    const assets = $("#btn-assets");
-    if (assets) {
-      assets.disabled = !me || !UI.canManage(game) || game.ownedTiles(me).length === 0;
-    }
+    // Building, mortgaging and selling live on the board itself now — click a
+    // plot you own and the inspector carries its controls. There is no separate
+    // sheet to enable a button for.
   };
 
   UI.showLastRoll = function (d1, d2) {
@@ -1000,7 +997,6 @@
     UI.setTurnChip(game);
     UI.setStatus(game);
     UI.refreshButtons(game);
-    UI.refreshBuildIfOpen(game);
     UI.refreshInspect(game);
     // a pending buy prompt re-checks affordability after any state change, so
     // mortgaging mid-prompt enables the Buy button without reopening anything
@@ -1086,14 +1082,11 @@
           + game.raisableCash(player) + " still raisable"
         : "\u20ac" + player.cash + " in hand \u2014 enough to settle";
       $("#btn-debt-pay").disabled = short > 0;
-      // no way out: say so rather than letting them hunt for a button
-      $("#btn-debt-raise").disabled = game.raisableCash(player) <= 0;
       UI.renderRaiseList(game, "#debt-raise-list");
     };
     refresh();
     UI._debtRefresh = refresh;
     openModal("#modal-debt");
-    $("#btn-debt-raise").onclick = () => UI.openBuild(game);
     $("#btn-debt-pay").onclick = () => UI.settleHandler && UI.settleHandler();
     $("#btn-debt-bankrupt").onclick = () => UI.bankruptHandler && UI.bankruptHandler();
   };
@@ -1193,10 +1186,7 @@
         box.classList.toggle("is-short", !afford);
         $("#offer-sub").textContent = afford
           ? detail + " \u00b7 \u20ac" + (cash - price) + " left after buying"
-          : "\u20ac" + short + " short \u2014 sell or mortgage on the board, then buy";
-        // a shortfall you genuinely cannot cover should not dangle a dead button
-        const raise = $("#btn-offer-raise");
-        if (raise) raise.disabled = !g || g.raisableCash(live) <= 0;
+          : "\u20ac" + short + " short \u2014 click a plot you own to mortgage or sell it";
       };
       refresh();
       UI._buyRefresh = refresh;
@@ -1228,10 +1218,6 @@
 
       buyBtn.onclick = () => done(true);
       $("#btn-offer-skip").onclick = () => done(false);
-      $("#btn-offer-raise").onclick = () => {
-        const g = (window.BT.mp && window.BT.mp.game) || UI.game || window.BT.game;
-        if (g) UI.openBuild(g);
-      };
       // the plot is on the table: point the inspector at it so its own Buy
       // button and rent ladder are one glance away
       if (window.BT.Deed) window.BT.Deed.show(tile.id);
@@ -1384,137 +1370,6 @@
   UI.mortgageHandler = null;
   UI.unmortgageHandler = null;
   UI.sellFieldHandler = null;
-
-  /* ---------------------------------------------------------------------------
-   * Property manager
-   *
-   * Everything you can do with a deed on your own turn, in one place: build and
-   * sell houses, mortgage and buy back, or sell a plot to the bank. It used to
-   * list only full country sets, which meant raising cash was impossible unless
-   * you happened to own a complete colour group — and the rest of the time the
-   * button was simply disabled. Now every owned tile appears, grouped by country
-   * with airports and utilities at the end, and each row only enables the
-   * actions the rules actually permit right now.
-   * ------------------------------------------------------------------------ */
-
-  function manageRow(game, p, tile, swatch) {
-    const ps = game.props[tile.id];
-    const allow = UI.canManage(game);
-    const row = document.createElement("div");
-    row.className = "build-row" + (ps.mortgaged ? " is-mortgaged" : "");
-
-    const state = ps.mortgaged
-      ? '<em class="build-row__flag">Mortgaged</em>'
-      : ps.houses >= ECONOMY.maxHouses
-        ? icon("houseSolid", "ic-chip ic-chip--hotel") + " Hotel"
-        : ps.houses > 0
-          ? Array.from({ length: ps.houses },
-            () => icon("houseSolid", "ic-chip ic-chip--house")).join("")
-          : "no houses";
-
-    row.innerHTML =
-      '<span class="build-row__color" style="background:' + swatch + '"></span>' +
-      '<span class="build-row__main"><span class="build-row__name">' + esc(tile.name) + "</span><br>" +
-      '<span class="build-row__houses">' + state +
-        " &middot; rent " + (ps.mortgaged ? "&euro;0" : "&euro;" + game.rentFor(tile)) +
-      "</span></span>";
-
-    const btn = (label, title, enabled, fn, cls) => {
-      const ok = enabled && allow;
-      const b = document.createElement("button");
-      b.className = "build-row__btn" + (cls ? " " + cls : "");
-      b.innerHTML = label;
-      b.title = allow ? title : title + " — not right now";
-      b.disabled = !ok;
-      if (ok) b.onclick = fn;
-      return b;
-    };
-
-    const acts = document.createElement("span");
-    acts.className = "build-row__acts";
-
-    if (tile.kind === "city") {
-      acts.append(
-        btn(icon("x", "ic-btn"), "Sell a house for \u20ac" +
-          Math.round(tile.houseCost * ECONOMY.sellRate),
-        game.canSellOn(p, tile), () => UI.sellHandler && UI.sellHandler(tile.id)),
-        btn("+", "Build a house for \u20ac" + tile.houseCost,
-          game.canBuildOn(p, tile), () => UI.buildHandler && UI.buildHandler(tile.id)),
-      );
-    }
-
-    if (game.rules.mortgages) {
-      acts.append(ps.mortgaged
-        ? btn(icon("key", "ic-btn"), "Buy the deed back for \u20ac" + game.unmortgageCost(tile),
-          game.canUnmortgage(p, tile), () => UI.unmortgageHandler && UI.unmortgageHandler(tile.id))
-        : btn(icon("banknote", "ic-btn"), "Mortgage for \u20ac" +
-            Math.round(tile.price * ECONOMY.mortgageRate),
-        game.canMortgage(p, tile), () => UI.mortgageHandler && UI.mortgageHandler(tile.id)));
-    }
-
-    acts.append(btn(icon("coins", "ic-btn"),
-      "Sell to the bank for \u20ac" + Math.round(tile.price * ECONOMY.sellRate),
-      game.canSellField(p, tile), () => UI.sellFieldHandler && UI.sellFieldHandler(tile.id),
-      "build-row__btn--sell"));
-
-    row.append(acts);
-    return row;
-  }
-
-  UI.openBuild = function (game) {
-    const list = $("#build-list");
-    UI._buildGame = game;
-
-    const render = () => {
-      /* MY deeds, not the deeds of whoever happens to be on turn. This read
-       * game.current, which online meant a guest opening the sheet was shown
-       * somebody else's portfolio and every button in it was dead. */
-      const p = UI.me(game);
-      list.innerHTML = "";
-      if (!p) return;
-      const owned = game.ownedTiles(p);
-      if (!owned.length) {
-        list.innerHTML = '<p class="modal-note" style="text-align:center">You do not own anything yet.</p>';
-        return;
-      }
-
-      // cities grouped by country, in board order, then the transport groups
-      for (const cid of Object.keys(COUNTRIES)) {
-        const mine = COUNTRY_GROUPS[cid].filter((id) => game.props[id].owner === p.id);
-        if (!mine.length) continue;
-        const c = COUNTRIES[cid];
-        const full = game.ownsGroup(p, cid);
-        const head = document.createElement("div");
-        head.className = "build-group";
-        head.innerHTML = '<i style="background:' + c.color + '"></i>' + esc(c.name) +
-          "<em>" + mine.length + "/" + COUNTRY_GROUPS[cid].length +
-          (full ? " &middot; house &euro;" + tileById(COUNTRY_GROUPS[cid][0]).houseCost : "") + "</em>";
-        list.appendChild(head);
-        for (const id of mine) list.appendChild(manageRow(game, p, tileById(id), c.color));
-      }
-
-      const others = owned.filter((t) => t.kind !== "city");
-      if (others.length) {
-        const head = document.createElement("div");
-        head.className = "build-group";
-        head.innerHTML = '<i style="background:#4f7d99"></i>Airports &amp; utilities' +
-          "<em>" + others.length + "</em>";
-        list.appendChild(head);
-        for (const t of others) list.appendChild(manageRow(game, p, t, kindColor(t)));
-      }
-    };
-
-    UI._buildRender = render;
-    render();
-    openModal("#modal-build");
-    $("#btn-build-close").onclick = () => closeModal("#modal-build");
-  };
-
-  UI.refreshBuildIfOpen = function (game) {
-    if ($("#modal-build").hidden || !UI._buildRender) return;
-    UI._buildGame = game;
-    UI._buildRender();
-  };
 
   /** Re-render the docked property inspector (deed.js owns the markup). */
   UI.refreshInspect = function () {

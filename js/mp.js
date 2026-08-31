@@ -1,4 +1,4 @@
-﻿/* ============================================================================
+/* ============================================================================
  * Balkan Tycoon — mp.js
  * Multiplayer controller. Host-authoritative model:
  *
@@ -160,7 +160,6 @@
         this._reconcilePawns();
         window.BT.game = this.game;
         UI.sync(this.game);
-        UI.refreshBuildIfOpen(this.game);
         this._renderTimerFromSnapshot();
       });
 
@@ -467,7 +466,6 @@
         },
         stateChanged() {
           UI.sync(self.game);
-          UI.refreshBuildIfOpen(self.game);
           self._broadcastState();
           self._armTurnTimer();
           self._armAutoSkip();

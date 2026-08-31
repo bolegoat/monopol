@@ -1,5 +1,5 @@
 /* ============================================================================
- * Balkan Tycoon — main.js
+ * Balkan Tycoon â€” main.js
  * Boot: render the board behind the pre-game menu, init the 3D dice + pawn
  * layer, then wire the menu flows:
  *   - local hot-seat  -> engine runs in-page
@@ -46,7 +46,7 @@
 
       /* Draw the numbers fairly, then animate them. Letting the physics decide
        * meant the spawn band, the velocity ranges and the cocked-die snap were
-       * all quietly weighting the outcome — see randomDice() in dice3d.js. */
+       * all quietly weighting the outcome â€” see randomDice() in dice3d.js. */
       rollDice: (cb) =>
         dice.roll((d1, d2, total) => {
           UI.showLastRoll(d1, d2);
@@ -85,7 +85,7 @@
       showCard: (card) => UI.showCard(card),
       auctionStep: (ctx) => UI.auctionStep(ctx),
       jailChoice: (player) => {
-        UI.setStatusRaw(`<strong>${player.name}</strong> is in prison…`);
+        UI.setStatusRaw(`<strong>${player.name}</strong> is in prisonâ€¦`);
         return UI.jailChoice(player);
       },
       gameOver: (winner, reason) => {
@@ -108,14 +108,14 @@
     UI.bankruptHandler = () => game.declareBankrupt(debtor());
     defs.forEach((_, i) => pawnLayer.addPlayer(game.players[i], i));
     UI.sync(game);
-    UI.log("dice", "#f4b73f", "Match started — good luck!");
+    UI.log("dice", "#f4b73f", "Match started â€” good luck!");
   }
 
   /* ---------- online plumbing ---------- */
 
   function connectMP(mode, code, profile, settings) {
     const net = new NetClient();
-    // Wire the controller BEFORE the request goes out — the relay broadcasts
+    // Wire the controller BEFORE the request goes out â€” the relay broadcasts
     // room:state right after the ack, and a late-registered handler would
     // drop that first snapshot (stranding the player on the join pane).
     mp = new MPController({ net, dice, pawnLayer });
@@ -158,7 +158,7 @@
       UI.sellFieldHandler = (tileId) => mp.clickSellField(tileId);
       return res;
     }).catch(() => {
-      // stale session — forget it quietly and stay on the menu
+      // stale session â€” forget it quietly and stay on the menu
       net.leave();
       if (net.socket) net.socket.disconnect();
       mp = null;
@@ -233,13 +233,9 @@
   $("#btn-end-turn").addEventListener("click", () => {
     /* With a property offer open the engine is still mid-landing, so there is
      * nothing to end yet. Decline the plot and let UI.sync spend the intent the
-     * moment the turn becomes endable — one click, not two. */
+     * moment the turn becomes endable â€” one click, not two. */
     if (UI.declineOffer(true)) return;
     endTurn();
-  });
-  $("#btn-assets").addEventListener("click", () => {
-    const g = activeGame();
-    if (g) UI.openBuild(g);
   });
   $("#btn-trade").addEventListener("click", () => openTrade());
   $("#btn-rules").addEventListener("click", () => UI.showRules(activeGame()));
@@ -281,9 +277,9 @@
     openTrade(id);
   });
 
-  /* Keyboard: R roll, E end turn, B build, T trade. Modals handle their own
+  /* Keyboard: R roll, E end turn, T trade. Modals handle their own
    * Enter/Escape (see ui.js), and anything typed in a field is left alone. */
-  const KEYS = { r: "#btn-roll", e: "#btn-end-turn", b: "#btn-assets", t: "#btn-trade" };
+  const KEYS = { r: "#btn-roll", e: "#btn-end-turn", t: "#btn-trade" };
 
   document.addEventListener("keydown", (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
