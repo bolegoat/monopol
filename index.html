@@ -54,6 +54,9 @@
                   <span class="hud-turn__sub" id="hud-turn-sub">Set up a game to begin</span>
                 </div>
                 <div class="hud-turn__side">
+                  <span class="hud-pot" id="hud-pot" hidden>
+                    <span class="hud-pot__ic" data-icon="coffee"></span>Pot <b id="hud-pot-val">&euro;0</b>
+                  </span>
                   <span class="hud-round" id="hud-round" hidden>R1</span>
                   <span class="turn-timer" id="turn-timer" hidden>
                     <span class="timer-ic" data-icon="clock"></span><b id="timer-value">45</b>
@@ -72,7 +75,26 @@
                 <canvas id="dice-canvas"></canvas>
               </div>
 
-              <!-- 3. actions -->
+              <!-- 3. a plot on the table: an offer, not a modal. It sits here
+                   until you answer it, so the board stays usable and you can
+                   raise the money before deciding. -->
+              <div class="hud-offer" id="hud-offer" hidden>
+                <span class="hud-offer__flag" id="offer-flag"></span>
+                <span class="hud-offer__tx">
+                  <b class="hud-offer__name" id="offer-name">Property</b>
+                  <span class="hud-offer__sub" id="offer-sub"></span>
+                </span>
+                <span class="hud-offer__price" id="offer-price">&euro;0</span>
+                <span class="hud-offer__acts">
+                  <button class="btn" id="btn-offer-raise" type="button">
+                    <span class="btn-ic" data-icon="banknote"></span>Raise cash
+                  </button>
+                  <button class="btn" id="btn-offer-skip" type="button">Skip</button>
+                  <button class="btn btn-primary" id="btn-offer-buy" type="button">Buy</button>
+                </span>
+              </div>
+
+              <!-- 4. actions -->
               <div class="hud-act">
                 <div class="hud-status" id="action-status">Set up a game to begin.</div>
                 <div class="hud-buttons">
@@ -92,15 +114,9 @@
                 </div>
               </div>
 
-              <!-- 4. action log, right in the middle of the table -->
+              <!-- 5. action log: four plain lines resting on the bottom edge -->
               <div class="hud-log">
-                <div class="hud-log__head">
-                  <span class="hud-log__ic" data-icon="history"></span>Action log
-                  <span class="hud-pot" id="hud-pot" hidden>
-                    <span class="hud-pot__ic" data-icon="coffee"></span>Pot <b id="hud-pot-val">&euro;0</b>
-                  </span>
-                </div>
-                <ul class="log-list" id="log-list"></ul>
+                <ul class="log-list" id="log-list" aria-label="Action log"></ul>
               </div>
             </div>
           </div>
@@ -381,29 +397,9 @@
 
       <!-- ============ IN-GAME MODALS ============ -->
 
-      <!-- property purchase -->
-      <div class="modal-overlay" id="modal-buy" hidden>
-        <div class="modal">
-          <div class="modal-flag" id="buy-colorbar"></div>
-          <!-- tilted plate + building silhouette: a cheap 3D read of the plot -->
-          <div class="buy-preview" aria-hidden="true">
-            <span class="buy-preview__plate" id="buy-preview-plate"></span>
-            <span class="buy-preview__piece" id="buy-preview-piece"></span>
-          </div>
-          <h2 class="modal-title" id="buy-name">Property</h2>
-          <p class="modal-sub" id="buy-country"></p>
-          <div class="modal-price" id="buy-price"></div>
-          <p class="modal-note" id="buy-rent"></p>
-          <div class="raise-box" id="buy-raise-box" hidden>
-            <div class="raise-box__head">Raise cash &mdash; nothing is sold for you</div>
-            <div class="raise-list" id="buy-raise-list"></div>
-          </div>
-          <div class="modal-actions">
-            <button class="btn" id="btn-pass">Skip</button>
-            <button class="btn btn-primary" id="btn-buy">Buy</button>
-          </div>
-        </div>
-      </div>
+      <!-- Landing on an unowned plot is handled by #hud-offer in the board
+           centre, not by a modal: an overlay would hide the very board you need
+           in order to raise the money. -->
 
       <!-- surprise / balkan event card (glassmorphism) -->
       <div class="modal-overlay modal-card-overlay" id="modal-card" hidden>

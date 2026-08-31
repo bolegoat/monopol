@@ -288,8 +288,22 @@
     if (!g || !me || !ps) return "";
 
     if (ps.owner !== me.id) {
-      // not yours: say what it would take, rather than showing dead buttons
       if (!ps.owner) {
+        /* This is the plot currently on offer, so the deed card can close the
+         * deal too. Handy when you have just finished mortgaging things and are
+         * already looking at the rent ladder rather than at the offer bar. */
+        if (UI.offerTileId === tile.id) {
+          const short = tile.price - me.cash;
+          return '<div class="deed-acts">' +
+            '<button class="btn btn-primary btn--wide" type="button" data-deed-act="buy-offer"' +
+              (short > 0 ? " disabled" : "") + ">" +
+              window.BT.icon("coins") + "Buy for " + euro(tile.price) + "</button>" +
+            '<p class="deed-acts__note">' + (short > 0
+              ? euro(short) + " short. Raise it anywhere on the board — the offer stays open."
+              : "On offer now. Ending your turn declines it.") + "</p>" +
+            "</div>";
+        }
+        // not yours: say what it would take, rather than showing dead buttons
         return '<div class="deed-acts"><p class="deed-acts__note">Unclaimed &mdash; ' +
           euro(tile.price) + " if you land on it.</p></div>";
       }
@@ -373,6 +387,7 @@
       b.onclick = () => {
         const UI = window.BT.UI;
         const id = b.dataset.tile;
+        if (b.dataset.deedAct === "buy-offer") { UI.acceptOffer(); return; }
         const map = {
           build: UI.buildHandler,
           sell: UI.sellHandler,

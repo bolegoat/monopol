@@ -413,16 +413,23 @@ body {
    Read as a plot with the lights off: the chip drains out, a hatch crosses the
    whole card and a plain-language stamp sits on the plot. You should never have
    to open a manager to find out why landing on someone's city was free. */
+/* The hatch wash carries the message at board distance; the chip confirms it up
+   close. It used to be the word MORTGAGED across the middle of the card, which
+   landed squarely on the city name and made half the tiles unreadable — and the
+   name is how you know which plot you are looking at. The rent pill is already
+   struck through and the owner chip already drains out, so the word was the
+   third telling of a story that was clear after the first. */
 .tile__mtg {
   position: absolute;
   inset: 0;
   display: none;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 3%;
   z-index: 4;
   pointer-events: none;
   background: repeating-linear-gradient(135deg,
-    rgba(0, 0, 0, 0.5) 0 5px, rgba(0, 0, 0, 0) 5px 11px);
+    rgba(0, 0, 0, 0.44) 0 5px, rgba(0, 0, 0, 0) 5px 11px);
 }
 
 .tile.is-hocked .tile__mtg { display: flex; }
@@ -430,21 +437,24 @@ body {
 .tile__mtg b {
   display: inline-flex;
   align-items: center;
-  gap: 0.22em;
-  padding: 0.14em 0.42em;
+  justify-content: center;
+  width: 1.55em;
+  height: 1.55em;
   border-radius: 4px;
-  background: rgba(10, 13, 18, 0.9);
-  border: 1px solid rgba(240, 182, 74, 0.6);
+  background: rgba(10, 13, 18, 0.92);
+  border: 1px solid rgba(240, 182, 74, 0.7);
   color: var(--gold);
-  font-size: min(clamp(0.42rem, 0.6vw, 0.6rem), 0.92cqw);
-  font-weight: 900;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  transform: rotate(-13deg);
-  white-space: nowrap;
+  font-size: min(clamp(0.5rem, 0.72vw, 0.72rem), 1.1cqw);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
 }
 
+/* the word is for screen readers and the tooltip, not for the tile */
+.tile__mtg b span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
 .tile__mtg .ic { width: 1.05em; height: 1.05em; }
+
+/* the name outranks the wash: it is the one thing you must always be able to read */
+.tile__body { position: relative; z-index: 5; }
 
 .tile.is-hocked .tile__owner {
   background-image: repeating-linear-gradient(135deg,
@@ -556,10 +566,11 @@ body {
     linear-gradient(160deg, #161c25, #10151c);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
   display: grid;
-  /* The log row is sized here rather than with a height on .hud-log itself: a
-     percentage height inside an `auto` grid row resolves against a row that is
-     sized by its content, which is circular — the log collapsed to a sliver. */
-  grid-template-rows: auto minmax(0, 1fr) auto minmax(84px, 30%);
+  /* turn banner / dice tray / offer / actions / log.
+     Only the dice tray flexes: everything else is exactly as tall as it needs to
+     be, so the space left over goes to the dice. The log is four lines of text
+     with its own em-based height; the offer collapses to nothing while hidden. */
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   gap: 0.6cqw;
   padding: 1.1cqw;
   overflow: hidden;
@@ -712,7 +723,91 @@ body {
   z-index: 5;
 }
 
-/* --- row 3: status + the action buttons, dead centre of the table --- */
+/* --- row 3: the property offer ---------------------------------------------
+   Landing on an unowned plot used to open a modal with Buy and Skip. That
+   covered the board, which is the one thing you need in order to do anything
+   about being short of the price — so "Skip" was the only real option and the
+   prompt demanded an answer before you could sell or mortgage a thing.
+   It is a bar in the middle of the table now. It stays put, the board stays
+   live behind it, and it is still there when you come back with the money.
+   -------------------------------------------------------------------------- */
+
+.hud-offer {
+  display: flex;
+  align-items: center;
+  gap: 0.8cqw;
+  padding: 0.7cqw 0.9cqw;
+  border-radius: 10px;
+  background: linear-gradient(100deg, rgba(240, 182, 74, 0.13), rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 0 0 1px rgba(240, 182, 74, 0.4);
+  animation: offer-in 260ms cubic-bezier(0.34, 1.35, 0.64, 1);
+  min-width: 0;
+}
+
+@keyframes offer-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.hud-offer__flag {
+  flex: 0 0 auto;
+  width: max(30px, 3.3cqw);
+  height: max(20px, 2.2cqw);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hud-offer__flag .ic { width: 60%; height: 60%; color: #e8eef7; }
+
+.hud-offer__tx { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+
+.hud-offer__name {
+  font-size: clamp(11px, 1.55cqw, 17px);
+  font-weight: 900;
+  line-height: 1.15;
+  color: var(--cream);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hud-offer__sub {
+  font-size: clamp(8px, 1.08cqw, 12px);
+  font-weight: 600;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hud-offer.is-short .hud-offer__sub { color: #ffb0b0; }
+
+.hud-offer__price {
+  flex: 0 0 auto;
+  font-size: clamp(13px, 2.1cqw, 24px);
+  font-weight: 900;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-offer__acts { display: flex; align-items: center; gap: 0.45cqw; flex: 0 0 auto; }
+
+.hud-offer__acts .btn {
+  font-size: clamp(10px, 1.25cqw, 14px);
+  padding: 0.5em 0.9em;
+  border-radius: 8px;
+}
+
+/* nothing to raise, or nothing short: the button would just be noise */
+.hud-offer:not(.is-short) #btn-offer-raise { display: none; }
+
+/* --- row 4: status + the action buttons, dead centre of the table --- */
 
 .hud-act { display: flex; flex-direction: column; gap: 0.5cqw; align-items: center; }
 
@@ -757,57 +852,47 @@ body {
   50% { box-shadow: 0 0 0 5px rgba(240, 182, 74, 0.13); }
 }
 
-/* --- row 4: the action log, in the middle where it gets read --- */
+/* --- row 5: the action log, in the middle where it gets read --- */
 
+/* Bare text sitting on the felt, exactly four lines tall, its last line resting
+   just above the bottom row of tiles. No panel, because the panel was the
+   problem: a bordered box with a heading is furniture, and it was taking a
+   third of the table to show four sentences. */
 .hud-log {
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   min-height: 0;
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.28);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
-  overflow: hidden;
+  padding: 0 0.4cqw;
+  font-size: clamp(8.5px, 1.16cqw, 13px);
+  /* four lines at line-height 1.55, and nothing more — the height is fixed so
+     the dice tray above it keeps everything else */
+  height: calc(4 * 1.55em);
 }
 
-.hud-log__head {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0.5cqw 0.8cqw 0.35cqw;
-  font-size: clamp(7.5px, 1cqw, 10.5px);
-  font-weight: 900;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: #64717f;
-}
+.hud-log__ic,
+.hud-log__head { display: none; } /* the log needs no label; it is obvious */
 
-.hud-log__ic { display: flex; }
-.hud-log__ic .ic { width: 1.2em; height: 1.2em; }
-
-/* the kafana pot, right where the money is being talked about */
+/* the kafana pot moved up beside the round counter, where the other
+   at-a-glance numbers live */
 .hud-pot {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: rgba(240, 182, 74, 0.13);
-  border: 1px solid rgba(240, 182, 74, 0.35);
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: rgba(240, 182, 74, 0.14);
+  border: 1px solid rgba(240, 182, 74, 0.38);
   color: var(--gold);
-  letter-spacing: 0.08em;
+  font-size: clamp(8.5px, 1.15cqw, 12.5px);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .hud-pot__ic { display: flex; }
-.hud-pot__ic .ic { width: 1.1em; height: 1.1em; }
+.hud-pot__ic .ic { width: 1.15em; height: 1.15em; }
 .hud-pot b { font-variant-numeric: tabular-nums; }
-
-.hud-log .log-list {
-  flex: 1 1 auto;
-  padding: 0 0.8cqw 0.5cqw;
-  font-size: clamp(8.5px, 1.12cqw, 12.5px);
-}
 /* ---------- pawns ---------- */
 
 .pawn-layer { position: absolute; inset: 0; pointer-events: none; z-index: 7; }
@@ -1292,27 +1377,56 @@ body {
 }
 
 /* log: bottom section, newest last */
-.log-list { flex: 1 1 auto; display: flex; flex-direction: column; gap: 3px; padding-top: 2px; }
+/* ---------------------------------------------------------------------------
+   Action log: four lines of plain text
+   Every entry used to be a rounded, tinted panel of its own, in a bordered box
+   with a header, filling a third of the table. On a board this is a running
+   commentary — it should read like one line of subtitles, not a stack of cards.
+   No box, no rules, no chrome: just the icon and the sentence.
+   -------------------------------------------------------------------------- */
+
+.log-list {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end; /* newest sits at the bottom edge */
+  gap: 0;
+  /* clears the padding and scrolling inherited from the side-panel list rule:
+     with 10px of bottom padding the four lines no longer fit the four-line box */
+  padding: 0;
+  overflow: hidden;
+}
 
 .log-entry {
   display: flex;
-  gap: 8px;
-  padding: 5.5px 8px;
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.028);
-  font-size: 12px;
-  line-height: 1.4;
+  gap: 0.5em;
+  align-items: baseline;
+  line-height: 1.55;
   animation: log-in 200ms ease;
 }
 
 @keyframes log-in {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(3px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-.log-entry__icon { flex: 0 0 auto; display: flex; padding-top: 1px; }
-.log-entry__icon .ic { width: 13px; height: 13px; }
-.log-entry__text { color: #c9d1dd; min-width: 0; overflow-wrap: break-word; }
+.log-entry__icon { flex: 0 0 auto; display: flex; align-self: center; opacity: 0.85; }
+.log-entry__icon .ic { width: 1.05em; height: 1.05em; }
+.log-entry__text {
+  color: #c9d1dd;
+  min-width: 0;
+  /* one line each: four short lines read at a glance, four wrapped paragraphs
+     do not, and wrapping would break the fixed four-line height */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* the older lines recede so the eye lands on the newest, but they all stay
+   readable — a line you cannot read is just clutter */
+.log-entry:first-child { opacity: 0.58; }
+.log-entry:nth-child(2) { opacity: 0.74; }
+.log-entry:nth-child(3) { opacity: 0.89; }
 /* ---------- modals ---------- */
 
 .modal-overlay {
@@ -2675,60 +2789,6 @@ body {
   }
   .tc-inv { display: none !important; }
   .tc-cols { grid-template-columns: 1fr 1fr; }
-}
-
-/* ============================================================
-   Buy modal: tilted 3D-ish plot preview
-   ============================================================ */
-
-.buy-preview {
-  position: relative;
-  height: 84px;
-  margin: 10px auto 2px;
-  width: 150px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  perspective: 420px;
-}
-
-.buy-preview__plate {
-  position: absolute;
-  left: 50%;
-  bottom: 6px;
-  width: 128px;
-  height: 84px;
-  transform: translateX(-50%) rotateX(62deg);
-  transform-origin: 50% 100%;
-  border-radius: 10px;
-  background-size: cover;
-  background-position: center;
-  box-shadow: 0 18px 30px -12px rgba(0, 0, 0, 0.8), inset 0 0 0 1px rgba(255, 255, 255, 0.18);
-  animation: plate-in 420ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-@keyframes plate-in {
-  from { opacity: 0; transform: translateX(-50%) rotateX(80deg) scale(0.86); }
-  to   { opacity: 1; transform: translateX(-50%) rotateX(62deg) scale(1); }
-}
-
-.buy-preview__piece {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 18px;
-  color: #f8fafc;
-  filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.7));
-  animation: piece-in 520ms cubic-bezier(0.34, 1.5, 0.64, 1) 120ms both;
-}
-
-.buy-preview__piece .ic-piece { width: 40px; height: 40px; }
-
-@keyframes piece-in {
-  from { opacity: 0; transform: translateY(-16px) scale(0.5); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* ============================================================

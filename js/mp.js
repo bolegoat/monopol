@@ -657,13 +657,20 @@
       this.net.sendEvent({ kind: "prompt", to: player.id, prompt: { ...prompt, id } });
       return new Promise((resolve) => {
         this.pendingPrompts.set(id, { resolve, playerId: player.id, fallback });
+        /* Only time a prompt out when the table asked for a clock. On an
+         * unlimited timer a purchase offer used to be silently withdrawn after
+         * 45 seconds — which is exactly the window a player needs to go and
+         * mortgage something before deciding. Absent seats are still covered:
+         * _onSeatOffline answers their prompts the moment they drop. */
+        const secs = this._turnSec();
+        if (secs == null) return;
         setTimeout(() => {
           const entry = this.pendingPrompts.get(id);
           if (!entry) return;
           this.pendingPrompts.delete(id);
           this._hostLog("clock", "#f59e0b", player.name + " took too long \u2014 auto-continuing");
           entry.resolve(fallback);
-        }, (this._turnSec() || 45) * 1000);
+        }, secs * 1000);
       });
     }
 

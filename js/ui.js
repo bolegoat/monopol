@@ -176,7 +176,8 @@
    * what landing on it costs, so it belongs on the board, not three clicks deep
    * in a manager. */
   const mortgageStamp = () =>
-    '<div class="tile__mtg" aria-hidden="true"><b>' + icon("banknote") + "Mortgaged</b></div>";
+    '<div class="tile__mtg"><b title="Mortgaged — collects no rent">' +
+      icon("banknote") + "<span>Mortgaged</span></b></div>";
 
   function tileInnerHTML(tile) {
     const price = '<span class="tile__price">&euro;' + tile.price + "</span>";
@@ -781,18 +782,25 @@
   };
   /* ================= Action log (bottom, newest last) ================= */
 
+  /** How many log lines the centre of the table shows at once. */
+  const LOG_LINES = 4;
+
+  /* Four lines, newest last, and the older ones simply fall off the top. There
+   * is no scrollback here on purpose: this is a running commentary you read out
+   * of the corner of your eye, and the full history already lives in the
+   * session log for anyone who needs to go back through it. */
   UI.log = function (iconKey, color, text) {
     const list = $("#log-list");
+    if (!list) return;
     const li = document.createElement("li");
     li.className = "log-entry";
     const safe = String(text).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
     li.innerHTML =
       '<span class="log-entry__icon" style="color:' + (color || "#8b98a8") + '">' + anyIcon(iconKey) + "</span>" +
-      '<span class="log-entry__text" style="color:' + (color || "inherit") + '">' + safe + "</span>";
-    const stick = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+      '<span class="log-entry__text" style="color:' + (color || "inherit") + '" title="' + safe + '">' +
+        safe + "</span>";
     list.appendChild(li);
-    while (list.children.length > 80) list.firstChild.remove();
-    if (stick) list.scrollTop = list.scrollHeight; // autoscroll unless user scrolled up
+    while (list.children.length > LOG_LINES) list.firstChild.remove();
   };
 
   /* ================= Status chrome ================= */
@@ -873,6 +881,12 @@
         : "Settling&hellip;";
       return;
     }
+    if (UI.offerPending()) {
+      el.innerHTML = game.doublesCount > 0
+        ? "Buy it or skip &mdash; you roll again after this"
+        : "Buy it, or just end your turn. The board is yours in the meantime.";
+      return;
+    }
     if (!UI.myTurn(game) && game.phase !== "over") {
       el.innerHTML = "Waiting for <strong>" + esc(p.name) + "</strong>&hellip;";
       return;
@@ -909,7 +923,14 @@
     const label = $("#btn-roll-label");
     if (label) label.textContent = phase === "awaiting-jail-roll" ? "Roll Doubles" : "Roll Dice";
 
-    $("#btn-end-turn").disabled = stuck || !mine || phase !== "turn-end";
+    /* An open offer keeps the engine in `busy`, but the turn is still yours and
+     * walking away from a plot you decided not to buy should just be "end turn".
+     * The exception is doubles: you owe the table another roll, so ending here
+     * would be a lie. */
+    const offer = UI.offerPending();
+    const rollsAgain = offer && game.doublesCount > 0;
+    $("#btn-end-turn").disabled =
+      stuck || !mine || !(phase === "turn-end" || (offer && !rollsAgain));
 
     // Trading is not turn-locked: a deal is a conversation, and forcing everyone
     // to wait for their own turn to even open the composer killed half of them.
@@ -949,6 +970,26 @@
     if (UI._buyRefresh) UI._buyRefresh();
     if (UI._debtRefresh) UI._debtRefresh();
     UI.checkOwnDebt(game);
+    UI._runDeferredEndTurn(game);
+  };
+
+  /* End Turn during an open offer means "no thanks, and I'm done". The engine
+   * needs a beat to close the landing out first (and online that beat is a round
+   * trip), so the intent is parked and spent the moment the turn is actually
+   * endable. It is dropped rather than remembered if anything else came up —
+   * doubles to re-roll, a debt to settle, or the turn moving on without us. */
+  UI.endTurnHandler = null;
+
+  UI._runDeferredEndTurn = function (game) {
+    if (!UI._endWhenReady) return;
+    if (!UI.myTurn(game) || game.phase === "settling" || game.phase === "over" ||
+        game.phase === "awaiting-roll" || game.phase === "awaiting-jail-roll") {
+      UI._endWhenReady = false;
+      return;
+    }
+    if (game.phase !== "turn-end") return; // still resolving; wait for the next sync
+    UI._endWhenReady = false;
+    if (UI.endTurnHandler) UI.endTurnHandler();
   };
 
   UI.settleHandler = null;
@@ -1058,76 +1099,130 @@
     });
   };
 
+  /* ---------------------------------------------------------------------------
+   * The property offer
+   *
+   * Landing on an unowned plot used to open a modal carrying Buy and Skip. The
+   * overlay covered the board, which is the one thing you need in order to do
+   * anything about being short of the asking price — so if the cash was not
+   * already in hand, Skip was the only move available, and the prompt sat there
+   * demanding an answer before you could sell or mortgage a single deed.
+   *
+   * It is a bar in the middle of the table now. Nothing is blocked: the board
+   * stays live, tiles stay clickable, the assets sheet opens over the top, and
+   * the offer is still sitting there when you come back with the money. Buy
+   * enables itself the moment you can afford it. Ending your turn is treated as
+   * declining, so you are never forced to click Skip.
+   * ------------------------------------------------------------------------ */
+
+  /** Tile id the open offer refers to, so the deed card can join in. */
+  UI.offerTileId = null;
+
   UI.promptBuy = function (player, tile, price) {
     return new Promise((resolve) => {
+      const box = $("#hud-offer");
       const isCity = tile.kind === "city";
-      const flag = $("#buy-colorbar");
-      // tilted plate preview: flag ground for cities, kind gradient otherwise
-      const plate = $("#buy-preview-plate");
-      const piece = $("#buy-preview-piece");
-      if (plate && piece) {
-        plate.style.cssText = isCity
-          ? flagBg(tile.country)
-          : "background:linear-gradient(150deg," + kindColor(tile) + ",#12171f)";
-        piece.innerHTML = icon(
-          isCity ? "house" : tile.kind === "airport" ? "plane" : tile.id === "balkan-electric" ? "zap" : "bottle",
-          "ic-piece",
-        );
-      }
-      if (isCity) {
-        const c = COUNTRIES[tile.country];
-        flag.style.cssText = flagBg(tile.country);
-        flag.classList.add("has-name");
-        flag.innerHTML = "<span>" + c.name + "</span>";
-        $("#buy-country").innerHTML =
-          "Base rent &euro;" + tile.baseRent + " &middot; House &euro;" + tile.houseCost;
-      } else if (tile.kind === "airport") {
-        flag.style.cssText = "background:linear-gradient(150deg,#2c4a60,#1b2f40)";
-        flag.innerHTML = icon("plane");
-        $("#buy-country").textContent = "Rent: 25 / 50 / 100 / 200 per airport owned";
-      } else {
-        flag.style.cssText = "background:linear-gradient(150deg,#4a4a24,#2e2e16)";
-        flag.innerHTML = icon(tile.id === "balkan-electric" ? "zap" : "bottle");
-        $("#buy-country").textContent = "Rent: 4x dice (10x dice if you own both)";
-      }
-      $("#buy-name").textContent = tile.name;
-      $("#buy-price").innerHTML = "&euro;" + price;
+      UI.offerTileId = tile.id;
 
-      /* The prompt now opens even when the money is not there, so it has to
-       * track the balance live: raise cash in the manager on top of this modal
-       * and Buy lights up by itself. Refreshed from UI.sync via _buyRefresh. */
-      const buyBtn = $("#btn-buy");
-      const raiseBox = $("#buy-raise-box");
+      const flag = $("#offer-flag");
+      if (isCity) {
+        flag.style.cssText = flagBg(tile.country);
+        flag.innerHTML = "";
+      } else {
+        flag.style.cssText = "background:linear-gradient(150deg," + kindColor(tile) + ",#12171f)";
+        flag.innerHTML = icon(
+          tile.kind === "airport" ? "plane" : tile.id === "balkan-electric" ? "zap" : "bottle");
+      }
+
+      $("#offer-name").textContent = tile.name;
+      $("#offer-price").innerHTML = "&euro;" + price;
+
+      const detail = isCity
+        ? COUNTRIES[tile.country].name + " \u00b7 base rent \u20ac" + tile.baseRent +
+          " \u00b7 house \u20ac" + tile.houseCost
+        : tile.kind === "airport"
+          ? "Transport \u00b7 rent 25 / 50 / 100 / 200 by airports owned"
+          : "Utility \u00b7 rent 4\u00d7 the dice, 10\u00d7 with both";
+
+      const buyBtn = $("#btn-offer-buy");
       const refresh = () => {
         const g = (window.BT.mp && window.BT.mp.game) || UI.game || window.BT.game;
-        const live = g ? g.player(player.id) : player;
-        const cash = live ? live.cash : player.cash;
+        const live = (g && g.player(player.id)) || player;
+        const cash = live.cash;
         const short = price - cash;
         const afford = short <= 0;
         buyBtn.disabled = !afford;
-        $("#buy-rent").textContent = afford
-          ? player.name + " \u00b7 cash after purchase: \u20ac" + (cash - price)
-          : player.name + " \u00b7 \u20ac" + cash + " in hand, \u20ac" + short + " short";
-        /* Short of the price? The deeds you could raise it against go right in
-         * the prompt. The plot is not going anywhere while you decide, so
-         * "can't afford it" should never be the end of the conversation. */
-        if (raiseBox) {
-          raiseBox.hidden = afford;
-          if (!afford && g) UI.renderRaiseList(g, "#buy-raise-list");
-        }
+        buyBtn.innerHTML = "Buy \u20ac" + price;
+        box.classList.toggle("is-short", !afford);
+        $("#offer-sub").textContent = afford
+          ? detail + " \u00b7 \u20ac" + (cash - price) + " left after buying"
+          : "\u20ac" + short + " short \u2014 sell or mortgage on the board, then buy";
+        // a shortfall you genuinely cannot cover should not dangle a dead button
+        const raise = $("#btn-offer-raise");
+        if (raise) raise.disabled = !g || g.raisableCash(live) <= 0;
       };
       refresh();
       UI._buyRefresh = refresh;
 
-      openModal("#modal-buy");
+      box.hidden = false;
+      window.BT.sfx && window.BT.sfx.open();
+
+      /* The engine's last repaint happened before this offer existed, so the
+       * status line still said "roll the dice" and End Turn was still locked.
+       * Nothing else is going to call sync until the offer is answered. */
+      const liveGame = () => (window.BT.mp && window.BT.mp.game) || UI.game || window.BT.game;
+
       const done = (wants) => {
+        if (UI._buyResolve !== done) return; // already answered
+        UI._buyResolve = null;
         UI._buyRefresh = null;
-        closeModal("#modal-buy");
+        UI.offerTileId = null;
+        box.hidden = true;
+        box.classList.remove("is-short");
+        const g = liveGame();
+        if (g) { UI.setStatus(g); UI.refreshButtons(g); }
+        UI.refreshInspect();
         resolve(wants);
       };
+      UI._buyResolve = done;
+
+      const g0 = liveGame();
+      if (g0) { UI.setStatus(g0); UI.refreshButtons(g0); }
+
       buyBtn.onclick = () => done(true);
-      $("#btn-pass").onclick = () => done(false);
+      $("#btn-offer-skip").onclick = () => done(false);
+      $("#btn-offer-raise").onclick = () => {
+        const g = (window.BT.mp && window.BT.mp.game) || UI.game || window.BT.game;
+        if (g) UI.openBuild(g);
+      };
+      // the plot is on the table: point the inspector at it so its own Buy
+      // button and rent ladder are one glance away
+      if (window.BT.Deed) window.BT.Deed.show(tile.id);
     });
+  };
+
+  /** Is a purchase offer waiting on this client? */
+  UI.offerPending = function () { return Boolean(UI._buyResolve); };
+
+  /**
+   * Answer an open offer with "no thanks".
+   * @param {boolean} andEndTurn also finish the turn once the engine allows it
+   * @returns {boolean} whether there was an offer to answer
+   */
+  UI.declineOffer = function (andEndTurn) {
+    const done = UI._buyResolve;
+    if (!done) return false;
+    if (andEndTurn) UI._endWhenReady = true;
+    done(false);
+    return true;
+  };
+
+  /** Buy from outside the offer bar (the deed card in the inspector). */
+  UI.acceptOffer = function () {
+    const done = UI._buyResolve;
+    if (!done || $("#btn-offer-buy").disabled) return false;
+    done(true);
+    return true;
   };
 
   /** Glassmorphism Balkan Surprise / Kafana Event card. `view` is a

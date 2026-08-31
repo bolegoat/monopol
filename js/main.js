@@ -223,8 +223,17 @@
     });
   }
 
+  const endTurn = () => (mp ? mp.clickEndTurn() : game && game.endTurn());
+  UI.endTurnHandler = endTurn;
+
   $("#btn-roll").addEventListener("click", () => (mp ? mp.clickRoll() : game && game.roll()));
-  $("#btn-end-turn").addEventListener("click", () => (mp ? mp.clickEndTurn() : game && game.endTurn()));
+  $("#btn-end-turn").addEventListener("click", () => {
+    /* With a property offer open the engine is still mid-landing, so there is
+     * nothing to end yet. Decline the plot and let UI.sync spend the intent the
+     * moment the turn becomes endable — one click, not two. */
+    if (UI.declineOffer(true)) return;
+    endTurn();
+  });
   $("#btn-assets").addEventListener("click", () => {
     const g = activeGame();
     if (g) UI.openBuild(g);

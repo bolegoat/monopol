@@ -13,12 +13,15 @@
 
 (function () {
   /* The camera sees roughly 6.7 world units across, so DIE_SIZE is directly a
-   * fraction of the board centre: at 1.1 each die filled ~18% of it, which read
-   * as two giant cubes parked on the logo rather than dice on a board. 0.62
-   * puts them near 9%, about the proportion of a real die to a real board.
-   * DIE_RADIUS is kept at the same ~13% of the edge so the corners stay as
-   * softly rounded as before instead of turning the cube into a pebble. */
-  const DIE_SIZE = 0.62;
+   * fraction of the frame: 1.05 puts each die at about 16% of the tray height.
+   *
+   * It was 0.62 (~9%) back when the canvas covered the entire board centre and
+   * anything larger read as two boulders parked on the logo. The dice now have a
+   * tray of their own, roughly a third of that area, and at 0.62 in it they were
+   * two specks you had to lean in to read. Sized to the space they actually get.
+   * DIE_RADIUS stays at ~13% of the edge, so the corners are as softly rounded
+   * as before rather than turning the cube into a pebble. */
+  const DIE_SIZE = 1.05;
   const DIE_RADIUS = DIE_SIZE * 0.127; // rounded corner radius
   const CEILING = 5; // invisible ceiling of the bounding box
   const SETTLE_SPEED = 0.12;
@@ -107,7 +110,9 @@
   }
 
   function faceTexture(value) {
-    const S = 128;
+    // 256, not 128: the dice are drawn a good deal larger now, and at the old
+    // resolution the pip edges and the bevel ring both went soft
+    const S = 256;
     const cv = document.createElement("canvas");
     cv.width = cv.height = S;
     const ctx = cv.getContext("2d");
@@ -150,7 +155,7 @@
     }
 
     const tex = new THREE.CanvasTexture(cv);
-    tex.anisotropy = 4;
+    tex.anisotropy = 8;
     return tex;
   }
 
@@ -208,23 +213,31 @@
       const reach = DIE_SIZE * 0.88; // conservative rotated half-reach of a die
       this.arena = (visHalf - reach) * 0.94;
 
-      /* --- lights --- */
-      this.scene.add(new THREE.AmbientLight(0xffffff, 0.65));
-      const key = new THREE.DirectionalLight(0xfff2d8, 0.95);
-      key.position.set(4, 10, 6);
+      /* --- lights ---
+       * The key sits well over the tray rather than off to one side. At the old
+       * angle a mid-air die threw its shadow a long way across the felt, and now
+       * that the dice are half again as big that shadow read as a solid black
+       * shape floating beside each one. Nearly overhead keeps it tucked under
+       * the die, where a shadow belongs. */
+      this.scene.add(new THREE.AmbientLight(0xffffff, 0.74));
+      const key = new THREE.DirectionalLight(0xfff2d8, 0.92);
+      key.position.set(2.2, 12, 3);
       key.castShadow = true;
       key.shadow.mapSize.set(1024, 1024);
-      key.shadow.camera.left = key.shadow.camera.bottom = -8;
-      key.shadow.camera.right = key.shadow.camera.top = 8;
+      // tight to the arena: the same texels over a quarter of the area
+      key.shadow.camera.left = key.shadow.camera.bottom = -4.5;
+      key.shadow.camera.right = key.shadow.camera.top = 4.5;
+      key.shadow.radius = 4; // PCFSoft blur, so the edge is not a cut-out
       this.scene.add(key);
-      const rim = new THREE.DirectionalLight(0x9db8ff, 0.35);
+      const rim = new THREE.DirectionalLight(0x9db8ff, 0.38);
       rim.position.set(-6, 6, -4);
       this.scene.add(rim);
 
       /* --- shadow-catcher floor (invisible, shows soft shadows) --- */
       const floor = new THREE.Mesh(
         new THREE.PlaneGeometry(30, 30),
-        new THREE.ShadowMaterial({ opacity: 0.35 }),
+        // 0.35 was a hole punched in the felt at this size; this is a shadow
+        new THREE.ShadowMaterial({ opacity: 0.2 }),
       );
       floor.rotation.x = -Math.PI / 2;
       floor.receiveShadow = true;
